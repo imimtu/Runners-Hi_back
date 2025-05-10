@@ -1,6 +1,6 @@
 FROM gradle:7.6-jdk17 as build
 WORKDIR /app
-COPY ../Running_Back_Test/running_test .
+COPY . .
 RUN gradle bootJar --no-daemon
 
 FROM openjdk:17-slim
