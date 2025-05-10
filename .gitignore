@@ -51,7 +51,8 @@ out/
 
 ### VS Code ###
 .vscode/
-
+new_deploy_key
+new_deploy_key.pub
 ### OS 관련 파일 ###
 .DS_Store
 Thumbs.db
