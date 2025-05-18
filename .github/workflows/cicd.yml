@@ -82,7 +82,9 @@ jobs:
                   - SPRING_DATA_REDIS_HOST=redis
                   - SPRING_DATA_REDIS_PORT=${REDIS_PORT}
                   - SPRING_DATA_REDIS_PASSWORD=${REDIS_PASSWORD}
-                  - APP_AUTH_JWT_SECRET_KEY=${JWT_SECRET}  
+                  - APP_AUTH_JWT_SECRET_KEY=${JWT_SECRET}
+                  - APP_AUTH_JWT_ACCESS_TOKEN_EXPIRATION_MS=3600000  # 1시간
+                  - APP_AUTH_JWT_REFRESH_TOKEN_EXPIRATION_MS=604800000  # 7일
 
                 restart: always
                 volumes:
