@@ -65,6 +65,23 @@ dependencies {
 
     // 로깅 향상
     implementation 'net.logstash.logback:logstash-logback-encoder:7.3'
+
+    // Spring Security 의존성
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+// OAuth2 클라이언트 지원
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+
+// JWT 토큰 생성 및 검증을 위한 라이브러리
+    implementation 'io.jsonwebtoken:jjwt-api:0.11.5'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.11.5'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5'
+
+// Redis 연동을 위한 의존성 (JWT 토큰 저장 용도)
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+// 유효성 검증 라이브러리
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
 }
 
 tasks.test {
