@@ -132,6 +132,17 @@ jobs:
                 depends_on:
                   - elasticsearch
                 restart: always
+              nginx:
+                image: nginx:latest
+                ports:
+                  - "80:80"
+                  - "443:443"
+              volumes:
+                - ./nginx/conf:/etc/nginx/conf.d
+                - ./nginx/ssl:/etc/nginx/ssl
+              depends_on:
+                - app
+              restart: always
 
             volumes:
               postgres-prod-data:
