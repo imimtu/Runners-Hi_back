@@ -68,14 +68,21 @@ jobs:
               app:
                 image: lsheon0927/runapp:latest
                 ports:
-                  - "9000:8080"
+                  - "${APP_PORT:-9000}:8080"
                 depends_on:
                   - postgres
+                  - redis
+                  - elasticsearch
                 environment:
                   - SPRING_PROFILES_ACTIVE=prod
                   - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME}
                   - SPRING_DATASOURCE_USERNAME=${DB_USER}
                   - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
+                  - SPRING_ELASTICSEARCH_REST_URIS=http://elasticsearch:9200
+                  - SPRING_DATA_REDIS_HOST=redis
+                  - SPRING_DATA_REDIS_PORT=${REDIS_PORT}
+                  - SPRING_DATA_REDIS_PASSWORD=${REDIS_PASSWORD}
+                  - JWT_SECRET=${JWT_SECRET}
                 restart: always
                 volumes:
                   - ./logs:/app/logs
@@ -92,8 +99,41 @@ jobs:
                   - postgres-prod-data:/var/lib/postgresql/data
                 restart: always
 
+              redis:
+                image: redis:latest
+                ports:
+                  - "${REDIS_PORT:-6379}:6379"
+                command: redis-server --requirepass ${REDIS_PASSWORD}
+                volumes:
+                  - redis-data:/data
+                restart: always
+
+              elasticsearch:
+                image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION:-7.17.9}
+                ports:
+                  - "9200:9200"
+                environment:
+                  - discovery.type=single-node
+                  - xpack.security.enabled=false
+                  - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+                volumes:
+                  - elasticsearch-prod-data:/usr/share/elasticsearch/data
+                restart: always
+
+              kibana:
+                image: docker.elastic.co/kibana/kibana:${ELASTIC_VERSION:-7.17.9}
+                ports:
+                  - "${KIBANA_PORT:-5601}:5601"
+                environment:
+                  - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+                depends_on:
+                  - elasticsearch
+                restart: always
+
             volumes:
               postgres-prod-data:
+              redis-data:
+              elasticsearch-prod-data:
             EOL
 
             # .env.prod 파일 생성
@@ -101,6 +141,12 @@ jobs:
             DB_NAME=${{ secrets.DB_NAME }}
             DB_USER=${{ secrets.DB_USER }}
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            REDIS_HOST=redis
+            REDIS_PORT=${{ secrets.REDIS_PORT }}
+            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            ELASTIC_VERSION=7.17.9
+            KIBANA_PORT=5601
             APP_PORT=9000
             SPRING_PROFILES_ACTIVE=prod
             EOL
