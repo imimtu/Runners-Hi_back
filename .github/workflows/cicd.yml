@@ -82,7 +82,8 @@ jobs:
                   - SPRING_DATA_REDIS_HOST=redis
                   - SPRING_DATA_REDIS_PORT=${REDIS_PORT}
                   - SPRING_DATA_REDIS_PASSWORD=${REDIS_PASSWORD}
-                  - JWT_SECRET=${JWT_SECRET}
+                  - APP_AUTH_JWT_SECRET_KEY=${JWT_SECRET}  
+
                 restart: always
                 volumes:
                   - ./logs:/app/logs
