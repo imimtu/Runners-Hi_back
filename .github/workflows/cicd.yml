@@ -46,32 +46,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to Production Server via SSH
+      # 단계 1: 서버 준비 및 Docker 로그인
+      - name: Prepare Server and Docker Login
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 2222
-          command_timeout: 20m  # 타임아웃 시간 증가
-          debug: true  # 디버깅 정보 활성화
+          command_timeout: 5m
           script: |
-            # 중간 상태 로깅 추가
-            echo "Starting deployment process..."
+            echo "Starting deployment process - Step 1: Server Preparation..."
             
             # 프로젝트 디렉토리로 이동
             mkdir -p ~/running-app
             cd ~/running-app
             echo "Created and moved to directory: $(pwd)"
             
-            # Docker 로그인 (인라인 에코 대신 환경 변수 사용)
+            # Docker 로그인
             echo "Logging into Docker Hub..."
             DOCKER_TOKEN='${{ secrets.DOCKER_HUB_TOKEN }}'
             echo "$DOCKER_TOKEN" | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
             echo "Docker login completed"
             
-            # 환경 변수 미리 설정 (변수 해석 문제 방지)
-            echo "Setting environment variables..."
+            # 환경 변수 저장 (다음 단계에서 사용하기 위해)
+            echo "Setting up environment variables for later steps..."
+            cat > ~/.deploy_env << EOL
             DB_NAME_VALUE='${{ secrets.DB_NAME }}'
             DB_USER_VALUE='${{ secrets.DB_USER }}'
             DB_PASSWORD_VALUE='${{ secrets.DB_PASSWORD }}'
@@ -79,8 +79,28 @@ jobs:
             REDIS_PORT_VALUE='${{ secrets.REDIS_PORT }}'
             REDIS_PASSWORD_VALUE='${{ secrets.REDIS_PASSWORD }}'
             JWT_SECRET_VALUE='${{ secrets.JWT_SECRET }}'
+            EOL
+            chmod 600 ~/.deploy_env
+            echo "Environment variables stored for later use"
+            echo "Step 1 completed successfully"
+
+      # 단계 2: 설정 파일 생성
+      - name: Create Configuration Files
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 2222
+          command_timeout: 5m
+          script: |
+            echo "Starting deployment process - Step 2: Creating Configuration Files..."
+            cd ~/running-app
             
-            # docker-compose-prod.yml 파일 생성 (여기서 YAML 문법 문제 해결)
+            # 환경 변수 로드
+            source ~/.deploy_env
+            
+            # docker-compose-prod.yml 파일 생성
             echo "Creating docker-compose-prod.yml file..."
             cat > docker-compose-prod.yml << 'EOL'
             version: '3'
@@ -172,7 +192,7 @@ jobs:
             EOL
             echo "docker-compose-prod.yml file created successfully"
             
-            # .env.prod 파일 생성 (GitHub Secrets 값 사용)
+            # .env.prod 파일 생성
             echo "Creating .env.prod file..."
             cat > .env.prod << EOL
             # 운영 환경 설정
@@ -200,16 +220,34 @@ jobs:
             EOL
             echo ".env.prod file created successfully"
             
+            # nginx 디렉토리 생성
+            mkdir -p ./nginx/conf ./nginx/ssl
+            echo "Created nginx directories"
+            
             # 디렉토리 구조 확인
             echo "Checking directory structure..."
             ls -la
+            echo "Step 2 completed successfully"
+
+      # 단계 3: 이미지 풀링 및 기존 컨테이너 종료
+      - name: Pull Images and Stop Containers
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 2222
+          command_timeout: 10m
+          script: |
+            echo "Starting deployment process - Step 3: Pulling Images and Stopping Containers..."
+            cd ~/running-app
             
             # 컨테이너 종료
             echo "Stopping existing containers..."
             docker-compose -f docker-compose-prod.yml --env-file .env.prod down || true
             echo "Containers stopped"
             
-            # 이미지 풀링을 각 서비스별로 분리 (타임아웃 방지)
+            # 이미지 풀링
             echo "Pulling images..."
             
             echo "Pulling PostgreSQL image..."
@@ -231,11 +269,31 @@ jobs:
             docker pull lsheon0927/runapp:latest || echo "Failed to pull app image, but continuing..."
             
             echo "All image pulls attempted"
+            echo "Step 3 completed successfully"
+
+      # 단계 4: 컨테이너 시작 및 배포 완료
+      - name: Start Containers and Finalize Deployment
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 2222
+          command_timeout: 10m
+          script: |
+            echo "Starting deployment process - Step 4: Starting Containers and Finalizing Deployment..."
+            cd ~/running-app
             
             # 컨테이너 시작
             echo "Starting containers..."
-            docker-compose -f docker-compose-prod.yml --env-file .env.prod up -d
-            echo "Containers started"
+            docker-compose -f docker-compose-prod.yml --env-file .env.prod up -d > compose_output.log 2>&1
+            if [ $? -ne 0 ]; then
+              echo "Docker Compose failed. See log below:"
+              cat compose_output.log
+              exit 1
+            else
+              echo "Containers started successfully"
+            fi
             
             # 불필요 이미지 정리
             echo "Cleaning up unused images..."
@@ -245,4 +303,10 @@ jobs:
             # 상태 확인
             echo "Checking container status..."
             docker ps -a
+            
+            # 애플리케이션 상태 확인
+            echo "Checking application health..."
+            sleep 10  # 애플리케이션이 시작할 시간을 줍니다
+            curl -s http://localhost:9000/health || echo "Health check failed, but deployment continuing"
+            
             echo "Deployment completed successfully!"
