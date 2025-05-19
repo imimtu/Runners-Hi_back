@@ -75,17 +75,16 @@ jobs:
                   - elasticsearch
                 environment:
                   - SPRING_PROFILES_ACTIVE=prod
-                  - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME}
-                  - SPRING_DATASOURCE_USERNAME=${DB_USER}
-                  - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
+                  - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME:-running_db_prod}
+                  - SPRING_DATASOURCE_USERNAME=${DB_USER:-runningapp_prod}
+                  - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-your_secure_prod_password}
                   - SPRING_ELASTICSEARCH_REST_URIS=http://elasticsearch:9200
-                  - SPRING_DATA_REDIS_HOST=redis
-                  - SPRING_DATA_REDIS_PORT=${REDIS_PORT}
-                  - SPRING_DATA_REDIS_PASSWORD=${REDIS_PASSWORD}
-                  - APP_AUTH_JWT_SECRET_KEY=${JWT_SECRET}
+                  - SPRING_DATA_REDIS_HOST=${REDIS_HOST:-redis}
+                  - SPRING_DATA_REDIS_PORT=${REDIS_PORT:-6379}
+                  - SPRING_DATA_REDIS_PASSWORD=${REDIS_PASSWORD:-redisrunning}
+                  - APP_AUTH_JWT_SECRET_KEY=${JWT_SECRET:-your_secure_jwt_secret_key_at_least_64_chars_longheyheyheyheyhey}
                   - APP_AUTH_JWT_ACCESS_TOKEN_EXPIRATION_MS=3600000  # 1시간
                   - APP_AUTH_JWT_REFRESH_TOKEN_EXPIRATION_MS=604800000  # 7일
-
                 restart: always
                 volumes:
                   - ./logs:/app/logs
@@ -95,18 +94,19 @@ jobs:
                 ports:
                   - "5433:5432"
                 environment:
-                  - POSTGRES_DB=${DB_NAME}
-                  - POSTGRES_USER=${DB_USER}
-                  - POSTGRES_PASSWORD=${DB_PASSWORD}
+                  - POSTGRES_DB=${DB_NAME:-running_db_prod}
+                  - POSTGRES_USER=${DB_USER:-runningapp_prod}
+                  - POSTGRES_PASSWORD=${DB_PASSWORD:-your_secure_prod_password}
                 volumes:
                   - postgres-prod-data:/var/lib/postgresql/data
                 restart: always
 
               redis:
                 image: redis:latest
+                container_name: ${REDIS_HOST:-redis}
                 ports:
                   - "${REDIS_PORT:-6379}:6379"
-                command: redis-server --requirepass ${REDIS_PASSWORD}
+                command: redis-server --requirepass ${REDIS_PASSWORD:-redisrunning}
                 volumes:
                   - redis-data:/data
                 restart: always
@@ -118,7 +118,7 @@ jobs:
                 environment:
                   - discovery.type=single-node
                   - xpack.security.enabled=false
-                  - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+                  - "ES_JAVA_OPTS=-Xms512m -Xmx512m"  # 메모리 사용량 줄임
                 volumes:
                   - elasticsearch-prod-data:/usr/share/elasticsearch/data
                 restart: always
@@ -132,6 +132,7 @@ jobs:
                 depends_on:
                   - elasticsearch
                 restart: always
+            
               nginx:
                 image: nginx:latest
                 ports:
@@ -152,18 +153,25 @@ jobs:
 
             # .env.prod 파일 생성
             cat > .env.prod << EOL
-            DB_NAME=${{ secrets.DB_NAME }}
-            DB_USER=${{ secrets.DB_USER }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            REDIS_HOST=redis
-            REDIS_PORT=${{ secrets.REDIS_PORT }}
-            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+            DB_NAME=${DB_NAME:-running_db_prod}
+            DB_USER=${DB_USER:-runningapp_prod}
+            DB_PASSWORD=${DB_PASSWORD:-your_secure_prod_password}
+            
+            REDIS_HOST=${REDIS_HOST:-redis}
+            REDIS_PORT=${REDIS_PORT:-6379}
+            REDIS_PASSWORD=${REDIS_PASSWORD:-redisrunning}
+            
             JWT_SECRET=${{ secrets.JWT_SECRET }}
+            
             ELASTIC_VERSION=7.17.9
             KIBANA_PORT=5601
             APP_PORT=9000
             SPRING_PROFILES_ACTIVE=prod
+            LOG_LEVEL=INFO
             EOL
+
+
+            
 
             # Docker Compose 실행 (운영 환경 설정)
             docker-compose -f docker-compose-prod.yml --env-file .env.prod down
@@ -172,3 +180,6 @@ jobs:
 
             # 사용하지 않는 이미지 정리
             docker image prune -f
+            
+            # 컨테이너 상태 확인
+            docker ps -a
