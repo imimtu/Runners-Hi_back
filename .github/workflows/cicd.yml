@@ -53,13 +53,35 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 2222
+          command_timeout: 20m  # 타임아웃 시간 증가
+          debug: true  # 디버깅 정보 활성화
           script: |
+            # 중간 상태 로깅 추가
+            echo "Starting deployment process..."
+            
             # 프로젝트 디렉토리로 이동
             mkdir -p ~/running-app
             cd ~/running-app
-            echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
-
-            # docker-compose-prod.yml 파일 생성
+            echo "Created and moved to directory: $(pwd)"
+            
+            # Docker 로그인 (인라인 에코 대신 환경 변수 사용)
+            echo "Logging into Docker Hub..."
+            DOCKER_TOKEN='${{ secrets.DOCKER_HUB_TOKEN }}'
+            echo "$DOCKER_TOKEN" | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
+            echo "Docker login completed"
+            
+            # 환경 변수 미리 설정 (변수 해석 문제 방지)
+            echo "Setting environment variables..."
+            DB_NAME_VALUE='${{ secrets.DB_NAME }}'
+            DB_USER_VALUE='${{ secrets.DB_USER }}'
+            DB_PASSWORD_VALUE='${{ secrets.DB_PASSWORD }}'
+            REDIS_HOST_VALUE='runningRedis'
+            REDIS_PORT_VALUE='${{ secrets.REDIS_PORT }}'
+            REDIS_PASSWORD_VALUE='${{ secrets.REDIS_PASSWORD }}'
+            JWT_SECRET_VALUE='${{ secrets.JWT_SECRET }}'
+            
+            # docker-compose-prod.yml 파일 생성 (여기서 YAML 문법 문제 해결)
+            echo "Creating docker-compose-prod.yml file..."
             cat > docker-compose-prod.yml << 'EOL'
             version: '3'
             services:
@@ -73,16 +95,16 @@ jobs:
                   - elasticsearch
                 environment:
                   - SPRING_PROFILES_ACTIVE=prod
-                  - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME:-running_db_prod}
-                  - SPRING_DATASOURCE_USERNAME=${DB_USER:-runningapp_prod}
-                  - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-your_secure_prod_password}
+                  - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME}
+                  - SPRING_DATASOURCE_USERNAME=${DB_USER}
+                  - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
                   - SPRING_ELASTICSEARCH_REST_URIS=http://elasticsearch:9200
-                  - SPRING_DATA_REDIS_HOST=${REDIS_HOST:-redis}
-                  - SPRING_DATA_REDIS_PORT=${REDIS_PORT:-6379}
-                  - SPRING_DATA_REDIS_PASSWORD=${REDIS_PASSWORD:-redisrunning}
-                  - APP_AUTH_JWT_SECRET_KEY=${JWT_SECRET:-your_secure_jwt_secret_key_at_least_64_chars_longheyheyheyheyhey}
-                  - APP_AUTH_JWT_ACCESS_TOKEN_EXPIRATION_MS=3600000  # 1시간
-                  - APP_AUTH_JWT_REFRESH_TOKEN_EXPIRATION_MS=604800000  # 7일
+                  - SPRING_DATA_REDIS_HOST=${REDIS_HOST}
+                  - SPRING_DATA_REDIS_PORT=${REDIS_PORT}
+                  - SPRING_DATA_REDIS_PASSWORD=${REDIS_PASSWORD}
+                  - APP_AUTH_JWT_SECRET_KEY=${JWT_SECRET}
+                  - APP_AUTH_JWT_ACCESS_TOKEN_EXPIRATION_MS=3600000
+                  - APP_AUTH_JWT_REFRESH_TOKEN_EXPIRATION_MS=604800000
                 restart: always
                 volumes:
                   - ./logs:/app/logs
@@ -92,19 +114,19 @@ jobs:
                 ports:
                   - "5433:5432"
                 environment:
-                  - POSTGRES_DB=${DB_NAME:-running_db_prod}
-                  - POSTGRES_USER=${DB_USER:-runningapp_prod}
-                  - POSTGRES_PASSWORD=${DB_PASSWORD:-your_secure_prod_password}
+                  - POSTGRES_DB=${DB_NAME}
+                  - POSTGRES_USER=${DB_USER}
+                  - POSTGRES_PASSWORD=${DB_PASSWORD}
                 volumes:
                   - postgres-prod-data:/var/lib/postgresql/data
                 restart: always
 
               redis:
                 image: redis:latest
-                container_name: ${REDIS_HOST:-redis}
+                container_name: ${REDIS_HOST}
                 ports:
-                  - "${REDIS_PORT:-6379}:6379"
-                command: redis-server --requirepass ${REDIS_PASSWORD:-redisrunning}
+                  - "${REDIS_PORT}:6379"
+                command: redis-server --requirepass ${REDIS_PASSWORD}
                 volumes:
                   - redis-data:/data
                 restart: always
@@ -116,7 +138,7 @@ jobs:
                 environment:
                   - discovery.type=single-node
                   - xpack.security.enabled=false
-                  - "ES_JAVA_OPTS=-Xms512m -Xmx512m"  # 메모리 사용량 줄임
+                  - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
                 volumes:
                   - elasticsearch-prod-data:/usr/share/elasticsearch/data
                 restart: always
@@ -148,36 +170,79 @@ jobs:
               redis-data:
               elasticsearch-prod-data:
             EOL
-
-            # .env.prod 파일 생성
+            echo "docker-compose-prod.yml file created successfully"
+            
+            # .env.prod 파일 생성 (GitHub Secrets 값 사용)
+            echo "Creating .env.prod file..."
             cat > .env.prod << EOL
-            DB_NAME=${DB_NAME:-running_db_prod}
-            DB_USER=${DB_USER:-runningapp_prod}
-            DB_PASSWORD=${DB_PASSWORD:-your_secure_prod_password}
-            
-            REDIS_HOST=${REDIS_HOST:-redis}
-            REDIS_PORT=${REDIS_PORT:-6379}
-            REDIS_PASSWORD=${REDIS_PASSWORD:-redisrunning}
-            
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
-            
+            # 운영 환경 설정
+            DB_NAME=${DB_NAME_VALUE}
+            DB_USER=${DB_USER_VALUE}
+            DB_PASSWORD=${DB_PASSWORD_VALUE}
+            DB_PORT=5433
+
+            # Elasticsearch 설정
             ELASTIC_VERSION=7.17.9
-            KIBANA_PORT=5601
+            ELASTIC_PASSWORD=elastic_secure_prod_password
+
+            # 애플리케이션 설정
             APP_PORT=9000
             SPRING_PROFILES_ACTIVE=prod
             LOG_LEVEL=INFO
+
+            # Redis 설정
+            REDIS_HOST=${REDIS_HOST_VALUE}
+            REDIS_PORT=${REDIS_PORT_VALUE}
+            REDIS_PASSWORD=${REDIS_PASSWORD_VALUE}
+
+            # JWT 설정
+            JWT_SECRET=${JWT_SECRET_VALUE}
             EOL
-
-
+            echo ".env.prod file created successfully"
             
-
-            # Docker Compose 실행 (운영 환경 설정)
-            docker-compose -f docker-compose-prod.yml --env-file .env.prod down
-            docker-compose -f docker-compose-prod.yml --env-file .env.prod pull
+            # 디렉토리 구조 확인
+            echo "Checking directory structure..."
+            ls -la
+            
+            # 컨테이너 종료
+            echo "Stopping existing containers..."
+            docker-compose -f docker-compose-prod.yml --env-file .env.prod down || true
+            echo "Containers stopped"
+            
+            # 이미지 풀링을 각 서비스별로 분리 (타임아웃 방지)
+            echo "Pulling images..."
+            
+            echo "Pulling PostgreSQL image..."
+            docker pull postgres:14 || echo "Failed to pull PostgreSQL image, but continuing..."
+            
+            echo "Pulling Redis image..."
+            docker pull redis:latest || echo "Failed to pull Redis image, but continuing..."
+            
+            echo "Pulling Elasticsearch image..."
+            docker pull docker.elastic.co/elasticsearch/elasticsearch:7.17.9 || echo "Failed to pull Elasticsearch image, but continuing..."
+            
+            echo "Pulling Kibana image..."
+            docker pull docker.elastic.co/kibana/kibana:7.17.9 || echo "Failed to pull Kibana image, but continuing..."
+            
+            echo "Pulling Nginx image..."
+            docker pull nginx:latest || echo "Failed to pull Nginx image, but continuing..."
+            
+            echo "Pulling app image..."
+            docker pull lsheon0927/runapp:latest || echo "Failed to pull app image, but continuing..."
+            
+            echo "All image pulls attempted"
+            
+            # 컨테이너 시작
+            echo "Starting containers..."
             docker-compose -f docker-compose-prod.yml --env-file .env.prod up -d
-
-            # 사용하지 않는 이미지 정리
-            docker image prune -f
+            echo "Containers started"
             
-            # 컨테이너 상태 확인
+            # 불필요 이미지 정리
+            echo "Cleaning up unused images..."
+            docker image prune -f
+            echo "Cleanup completed"
+            
+            # 상태 확인
+            echo "Checking container status..."
             docker ps -a
+            echo "Deployment completed successfully!"
