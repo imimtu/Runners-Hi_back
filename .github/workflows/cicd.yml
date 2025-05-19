@@ -1,4 +1,4 @@
-name: Spring Boot CI/CD
+name: Spring Boot 앱 CI/CD
 
 on:
   push:
@@ -7,368 +7,56 @@ on:
     branches: [ main ]
 
 jobs:
-  build-and-test:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: 코드 체크아웃
         uses: actions/checkout@v3
 
-      - name: Set up JDK 17
+      - name: JDK 17 설정
         uses: actions/setup-java@v3
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: gradle
 
-      - name: Grant execute permission for gradlew
+      - name: gradlew 실행 권한 부여
         run: chmod +x ./gradlew
 
-      - name: Build with Gradle (without tests)
+      - name: Gradle로 빌드 (테스트 제외)
         run: ./gradlew build -x test
 
-      - name: Login to Docker Hub
+      - name: Docker Hub 로그인
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Docker 이미지 빌드 및 푸시
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
           tags: lsheon0927/runapp:latest
 
-  # 운영 환경 배포 (main 브랜치)
-  deploy-prod:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-
-    steps:
-      # 스크립트 파일 준비
-      - name: Prepare deployment scripts
-        run: |
-          mkdir -p scripts
-          
-          # 배포 스크립트 생성 - 서버 준비 및 Docker 로그인
-          cat > scripts/1-prepare.sh << 'EOL'
-          #!/bin/bash
-          set -e
-          
-          echo "Starting deployment process - Step 1: Server Preparation..."
-          
-          # 프로젝트 디렉토리로 이동
-          mkdir -p ~/running-app
-          cd ~/running-app
-          echo "Created and moved to directory: $(pwd)"
-          
-          # Docker 로그인
-          echo "Logging into Docker Hub..."
-          echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USERNAME" --password-stdin
-          echo "Docker login completed"
-          
-          # 환경 변수 저장 (다음 단계에서 사용하기 위해)
-          echo "Setting up environment variables for later steps..."
-          cat > ~/.deploy_env << EOL2
-          DB_NAME=${DB_NAME}
-          DB_USER=${DB_USER}
-          DB_PASSWORD=${DB_PASSWORD}
-          REDIS_HOST=runningRedis
-          REDIS_PORT=${REDIS_PORT}
-          REDIS_PASSWORD=${REDIS_PASSWORD}
-          JWT_SECRET=${JWT_SECRET}
-          EOL2
-          
-          chmod 600 ~/.deploy_env
-          echo "Environment variables stored for later use"
-          echo "Step 1 completed successfully"
-          EOL
-          
-          # 배포 스크립트 생성 - 설정 파일 생성
-          cat > scripts/2-create-config.sh << 'EOL'
-          #!/bin/bash
-          set -e
-          
-          echo "Starting deployment process - Step 2: Creating Configuration Files..."
-          cd ~/running-app
-          
-          # 환경 변수 로드
-          source ~/.deploy_env
-          
-          # docker-compose-prod.yml 파일 생성
-          echo "Creating docker-compose-prod.yml file..."
-          cat > docker-compose-prod.yml << 'EOL2'
-          version: '3'
-          services:
-            app:
-              image: lsheon0927/runapp:latest
-              ports:
-                - "${APP_PORT:-9000}:8080"
-              depends_on:
-                - postgres
-                - redis
-                - elasticsearch
-              environment:
-                - SPRING_PROFILES_ACTIVE=prod
-                - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME}
-                - SPRING_DATASOURCE_USERNAME=${DB_USER}
-                - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
-                - SPRING_ELASTICSEARCH_REST_URIS=http://elasticsearch:9200
-                - SPRING_DATA_REDIS_HOST=${REDIS_HOST}
-                - SPRING_DATA_REDIS_PORT=${REDIS_PORT}
-                - SPRING_DATA_REDIS_PASSWORD=${REDIS_PASSWORD}
-                - APP_AUTH_JWT_SECRET_KEY=${JWT_SECRET}
-                - APP_AUTH_JWT_ACCESS_TOKEN_EXPIRATION_MS=3600000
-                - APP_AUTH_JWT_REFRESH_TOKEN_EXPIRATION_MS=604800000
-              restart: always
-              volumes:
-                - ./logs:/app/logs
-
-            postgres:
-              image: postgres:14
-              ports:
-                - "5433:5432"
-              environment:
-                - POSTGRES_DB=${DB_NAME}
-                - POSTGRES_USER=${DB_USER}
-                - POSTGRES_PASSWORD=${DB_PASSWORD}
-              volumes:
-                - postgres-prod-data:/var/lib/postgresql/data
-              restart: always
-
-            redis:
-              image: redis:latest
-              container_name: ${REDIS_HOST}
-              ports:
-                - "${REDIS_PORT}:6379"
-              command: redis-server --requirepass ${REDIS_PASSWORD}
-              volumes:
-                - redis-data:/data
-              restart: always
-
-            elasticsearch:
-              image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION:-7.17.9}
-              ports:
-                - "9200:9200"
-              environment:
-                - discovery.type=single-node
-                - xpack.security.enabled=false
-                - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-              volumes:
-                - elasticsearch-prod-data:/usr/share/elasticsearch/data
-              restart: always
-
-            kibana:
-              image: docker.elastic.co/kibana/kibana:${ELASTIC_VERSION:-7.17.9}
-              ports:
-                - "${KIBANA_PORT:-5601}:5601"
-              environment:
-                - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-              depends_on:
-                - elasticsearch
-              restart: always
-          
-            nginx:
-              image: nginx:latest
-              ports:
-                - "80:80"
-                - "443:443"
-              volumes:
-                - ./nginx/conf:/etc/nginx/conf.d
-                - ./nginx/ssl:/etc/nginx/ssl
-              depends_on:
-                - app
-              restart: always
-
-          volumes:
-            postgres-prod-data:
-            redis-data:
-            elasticsearch-prod-data:
-          EOL2
-          
-          echo "docker-compose-prod.yml file created successfully"
-          
-          # .env.prod 파일 생성
-          echo "Creating .env.prod file..."
-          cat > .env.prod << EOL2
-          # 운영 환경 설정
-          DB_NAME=${DB_NAME}
-          DB_USER=${DB_USER}
-          DB_PASSWORD=${DB_PASSWORD}
-          DB_PORT=5433
-
-          # Elasticsearch 설정
-          ELASTIC_VERSION=7.17.9
-          ELASTIC_PASSWORD=elastic_secure_prod_password
-
-          # 애플리케이션 설정
-          APP_PORT=9000
-          SPRING_PROFILES_ACTIVE=prod
-          LOG_LEVEL=INFO
-
-          # Redis 설정
-          REDIS_HOST=${REDIS_HOST}
-          REDIS_PORT=${REDIS_PORT}
-          REDIS_PASSWORD=${REDIS_PASSWORD}
-
-          # JWT 설정
-          JWT_SECRET=${JWT_SECRET}
-          EOL2
-          
-          echo ".env.prod file created successfully"
-          
-          # nginx 디렉토리 생성
-          mkdir -p ./nginx/conf ./nginx/ssl
-          echo "Created nginx directories"
-          
-          # 디렉토리 구조 확인
-          echo "Checking directory structure..."
-          ls -la
-          echo "Step 2 completed successfully"
-          EOL
-          
-          # 배포 스크립트 생성 - 이미지 풀링 및 컨테이너 종료
-          cat > scripts/3-pull-images.sh << 'EOL'
-          #!/bin/bash
-          set -e
-          
-          echo "Starting deployment process - Step 3: Pulling Images and Stopping Containers..."
-          cd ~/running-app
-          
-          # 컨테이너 종료
-          echo "Stopping existing containers..."
-          docker-compose -f docker-compose-prod.yml --env-file .env.prod down || true
-          echo "Containers stopped"
-          
-          # 이미지 풀링
-          echo "Pulling images..."
-          
-          echo "Pulling PostgreSQL image..."
-          docker pull postgres:14 || echo "Failed to pull PostgreSQL image, but continuing..."
-          
-          echo "Pulling Redis image..."
-          docker pull redis:latest || echo "Failed to pull Redis image, but continuing..."
-          
-          echo "Pulling Elasticsearch image..."
-          docker pull docker.elastic.co/elasticsearch/elasticsearch:7.17.9 || echo "Failed to pull Elasticsearch image, but continuing..."
-          
-          echo "Pulling Kibana image..."
-          docker pull docker.elastic.co/kibana/kibana:7.17.9 || echo "Failed to pull Kibana image, but continuing..."
-          
-          echo "Pulling Nginx image..."
-          docker pull nginx:latest || echo "Failed to pull Nginx image, but continuing..."
-          
-          echo "Pulling app image..."
-          docker pull lsheon0927/runapp:latest || echo "Failed to pull app image, but continuing..."
-          
-          echo "All image pulls attempted"
-          echo "Step 3 completed successfully"
-          EOL
-          
-          # 배포 스크립트 생성 - 컨테이너 시작
-          cat > scripts/4-start-containers.sh << 'EOL'
-          #!/bin/bash
-          set -e
-          
-          echo "Starting deployment process - Step 4: Starting Containers and Finalizing Deployment..."
-          cd ~/running-app
-          
-          # 컨테이너 시작
-          echo "Starting containers..."
-          docker-compose -f docker-compose-prod.yml --env-file .env.prod up -d > compose_output.log 2>&1
-          if [ $? -ne 0 ]; then
-            echo "Docker Compose failed. See log below:"
-            cat compose_output.log
-            exit 1
-          else
-            echo "Containers started successfully"
-          fi
-          
-          # 불필요 이미지 정리
-          echo "Cleaning up unused images..."
-          docker image prune -f
-          echo "Cleanup completed"
-          
-          # 상태 확인
-          echo "Checking container status..."
-          docker ps -a
-          
-          # 애플리케이션 상태 확인
-          echo "Checking application health..."
-          sleep 10  # 애플리케이션이 시작할 시간을 줍니다
-          curl -s http://localhost:9000/health || echo "Health check failed, but deployment continuing"
-          
-          echo "Deployment completed successfully!"
-          EOL
-          
-          # 모든 스크립트에 실행 권한 추가
-          chmod +x scripts/*.sh
-
-      # 스크립트 파일을 서버에 전송
-      - name: Upload Deployment Scripts
-        uses: appleboy/scp-action@master
+      - name: 서버에 배포
+        uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 2222
-          source: "scripts/*"
-          target: "~"
-          overwrite: true
-
-      # 1단계: 서버 준비 및 Docker 로그인
-      - name: Step 1 - Prepare Server
-        uses: fifsky/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          user: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 2222
-          command_timeout: 5m
-          command: |
-            export DOCKER_TOKEN='${{ secrets.DOCKER_HUB_TOKEN }}'
-            export DOCKER_USERNAME='${{ secrets.DOCKER_HUB_USERNAME }}'
-            export DB_NAME='${{ secrets.DB_NAME }}'
-            export DB_USER='${{ secrets.DB_USER }}'
-            export DB_PASSWORD='${{ secrets.DB_PASSWORD }}'
-            export REDIS_PORT='${{ secrets.REDIS_PORT }}'
-            export REDIS_PASSWORD='${{ secrets.REDIS_PASSWORD }}'
-            export JWT_SECRET='${{ secrets.JWT_SECRET }}'
-            bash ~/scripts/1-prepare.sh
-
-      # 2단계: 설정 파일 생성
-      - name: Step 2 - Create Configuration Files
-        if: success()
-        uses: fifsky/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          user: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 2222
-          command_timeout: 5m
-          command: bash ~/scripts/2-create-config.sh
-
-      # 3단계: 이미지 풀링 및 기존 컨테이너 종료
-      - name: Step 3 - Pull Images and Stop Containers
-        if: success()
-        uses: fifsky/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          user: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 2222
-          command_timeout: 10m
-          command: bash ~/scripts/3-pull-images.sh
-
-      # 4단계: 컨테이너 시작 및 배포 완료
-      - name: Step 4 - Start Containers and Finalize
-        if: success()
-        uses: fifsky/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          user: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 2222
-          command_timeout: 10m
-          command: bash ~/scripts/4-start-containers.sh
+          script: |
+            # 앱 디렉토리로 이동
+            cd ~/running-app/app
+            
+            # 최신 이미지 가져오기
+            docker pull lsheon0927/runapp:latest
+            
+            # 앱 재시작
+            docker compose down
+            docker compose up -d
+            
+            # 미사용 이미지 정리
+            docker image prune -f
