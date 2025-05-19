@@ -40,23 +40,19 @@ jobs:
           push: true
           tags: lsheon0927/runapp:latest
 
+      - name: SSH 키 파일 생성
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
       - name: 서버에 배포
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 2222
-          script: |
-            # 앱 디렉토리로 이동
-            cd ~/running-app/app
-            
-            # 최신 이미지 가져오기
-            docker pull lsheon0927/runapp:latest
-            
-            # 앱 재시작
-            docker compose down
-            docker compose up -d
-            
-            # 미사용 이미지 정리
+        run: |
+          ssh -p 2222 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+            cd ~/running-app/app && 
+            docker pull lsheon0927/runapp:latest && 
+            docker-compose down && 
+            docker-compose up -d && 
             docker image prune -f
+          "
