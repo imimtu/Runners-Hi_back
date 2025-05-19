@@ -57,8 +57,6 @@ jobs:
             # 프로젝트 디렉토리로 이동
             mkdir -p ~/running-app
             cd ~/running-app
-
-            # Docker Hub 로그인
             echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
 
             # docker-compose-prod.yml 파일 생성
