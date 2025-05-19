@@ -41,22 +41,15 @@ jobs:
           tags: lsheon0927/runapp:latest
 
       - name: 서버에 배포
-        uses: appleboy/ssh-action@master
+        uses: garygrossgarten/github-action-ssh@release
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          privateKey: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 2222
-          script: |
-            # 앱 디렉토리로 이동
+          command: |
             cd ~/running-app/app
-            
-            # 최신 이미지 가져오기
             docker pull lsheon0927/runapp:latest
-            
-            # 앱 재시작
             docker compose down
             docker compose up -d
-            
-            # 미사용 이미지 정리
             docker image prune -f
