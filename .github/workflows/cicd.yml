@@ -1,11 +1,11 @@
-name: Docker 이미지 빌드 및 푸시
+name: Docker 이미지 빌드 및 배포
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: 코드 체크아웃
@@ -25,10 +25,20 @@ jobs:
           tags: lsheon0927/runapp:latest
 
       - name: SSH 키 설정
-        uses: webfactory/ssh-agent@v0.7.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: 서버에 배포
         run: |
-          ssh -o StrictHostKeyChecking=no -p 2222 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "chmod +x ~/deploy.sh && ~/deploy.sh"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 스크립트 전송 및 실행
+        run: |
+          # 강화된 SSH 연결 옵션으로 연결 유지
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o ServerAliveCountMax=10 -p 2222 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'ENDSSH'
+          # 스크립트 내용을 직접 실행
+          cd ~/running-app/app
+          docker pull lsheon0927/runapp:latest
+          docker compose down
+          docker compose up -d
+          docker image prune -f
+          ENDSSH
