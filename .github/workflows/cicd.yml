@@ -2,7 +2,9 @@ name: Docker 이미지 빌드
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]  # develop 브랜치 추가
+  pull_request:
+    branches: [ main ]  # main으로의 PR만
 
 jobs:
   build:
@@ -22,4 +24,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: lsheon0927/runapp:latest
+          tags: |
+            lsheon0927/runapp:latest
+            lsheon0927/runapp:${{ github.sha }}
