@@ -26,5 +26,4 @@ jobs:
           push: true
           tags: |
             lsheon0927/runapp:latest
-            lsheon0927/runapp:${{ github.ref_name }}
             lsheon0927/runapp:${{ github.sha }}
