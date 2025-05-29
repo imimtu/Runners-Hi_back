@@ -61,6 +61,7 @@ docker-compose.override.yml
 docker-compose.yml
 docker-compose-dev.yml
 docker-compose-prod.yml
+docker-compose-local.yml
 prometheus.yml
 ### 로그 파일 ###
 logs/
