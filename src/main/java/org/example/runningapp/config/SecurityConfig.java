@@ -32,8 +32,8 @@ public class SecurityConfig {
 			.formLogin(AbstractHttpConfigurer::disable)
 			.httpBasic(AbstractHttpConfigurer::disable)
 			.authorizeHttpRequests(authorize -> authorize
-				.requestMatchers("/api/auth/**", "/health","/actuator/**")
-				.permitAll()
+				.requestMatchers("/api/auth/**", "/health", "/actuator/**").permitAll()
+				.requestMatchers("/api/gps/**").authenticated()  // GPS API는 인증 필요
 				.anyRequest().authenticated());
 
 		http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

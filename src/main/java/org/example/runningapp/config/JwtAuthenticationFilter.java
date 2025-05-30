@@ -25,15 +25,14 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
+
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 	private final JwtTokenProvider tokenProvider;
-	private final UserRepository userRepository;
 	private final RedisService redisService;
-
 	private static final String AUTHORIZATION_HEADER = "Authorization";
 	private static final String BEARER_PREFIX = "Bearer ";
 
@@ -44,21 +43,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			Optional<String> jwt = extractJwtFromRequest(request);
 
 			jwt.ifPresent(token -> {
-				// 토큰이 블랙리스트에 있는지 확인 (로그아웃된 토큰)
+				// 토큰이 블랙리스트에 있는지 확인
 				if (redisService.isTokenBlacklisted(token)) {
 					log.debug("블랙리스트에 등록된 토큰입니다");
 					return;
 				}
 
-				if (tokenProvider.validateToken(token)) {
-					Long userId = tokenProvider.getUserIdFromToken(token);
-					userRepository.findById(userId)
-						.ifPresent(user -> setAuthenticationContext(user, request));
-				}
+				// 토큰 검증과 동시에 사용자 정보 조회 (DB 조회 1번으로 최적화)
+				tokenProvider.validateTokenAndGetUser(token)
+					.ifPresent(user -> setAuthenticationContext(user, request));
 			});
-		} catch (InvalidJwtException e) {
+		} catch (Exception e) {
 			log.error("JWT 인증 처리 중 오류 발생: {}", e.getMessage());
-			// 인증 실패 시 SecurityContext는 비워진 상태로 유지됨
 		}
 
 		filterChain.doFilter(request, response);
