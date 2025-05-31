@@ -8,7 +8,11 @@ import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.Keys;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.example.runningapp.User;
+import org.example.runningapp.UserRepository;
 import org.example.runningapp.config.dto.TokenDto;
 import org.example.runningapp.exception.InvalidJwtException;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,6 +22,7 @@ import java.security.Key;
 import java.security.SignatureException;
 import java.time.Instant;
 import java.util.Date;
+import java.util.Optional;
 
 @Slf4j
 @Component
@@ -26,15 +31,18 @@ public class JwtTokenProvider {
 	private final Key key;
 	private final long accessTokenExpirationMs;
 	private final long refreshTokenExpirationMs;
+	private final UserRepository userRepository;  // 추가
+
 
 	public JwtTokenProvider(
 		@Value("${app.auth.jwt.secret-key}") String secretKey,
 		@Value("${app.auth.jwt.access-token-expiration-ms}") long accessTokenExpirationMs,
-		@Value("${app.auth.jwt.refresh-token-expiration-ms}") long refreshTokenExpirationMs) {
-		// 보안을 위해 충분히 긴 키 사용 (256비트 이상)
+		@Value("${app.auth.jwt.refresh-token-expiration-ms}") long refreshTokenExpirationMs,
+		UserRepository userRepository) {  // 추가
 		this.key = Keys.hmacShaKeyFor(secretKey.getBytes());
 		this.accessTokenExpirationMs = accessTokenExpirationMs;
 		this.refreshTokenExpirationMs = refreshTokenExpirationMs;
+		this.userRepository = userRepository;  // 추가
 	}
 
 	public TokenDto generateTokenPair(Long userId) {
@@ -85,13 +93,14 @@ public class JwtTokenProvider {
 		}
 	}
 
-	public boolean validateToken(String token) {
+	public Optional<User> validateTokenAndGetUser(String token) {
 		try {
-			parseToken(token);
-			return true;
+			Claims claims = parseToken(token);
+			Long userId = Long.parseLong(claims.getSubject());
+			return userRepository.findById(userId);
 		} catch (InvalidJwtException e) {
 			log.debug("JWT 토큰 검증 실패: {}", e.getMessage());
-			return false;
+			return Optional.empty();
 		}
 	}
 }

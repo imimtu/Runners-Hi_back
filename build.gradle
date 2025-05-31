@@ -40,8 +40,6 @@ dependencies {
     // PostgreSQL 드라이버
     runtimeOnly 'org.postgresql:postgresql'
 
-    // Elasticsearch 의존성
-    implementation 'org.springframework.boot:spring-boot-starter-data-elasticsearch'
 
     // 모니터링을 위한 Actuator 및 Micrometer
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
@@ -61,10 +59,6 @@ dependencies {
     implementation 'io.micrometer:micrometer-registry-prometheus'
 
     implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
-
-
-    // Elasticsearch 통합
-    implementation 'org.springframework.boot:spring-boot-starter-data-elasticsearch'
 
     // 로깅 향상
     implementation 'net.logstash.logback:logstash-logback-encoder:7.3'
