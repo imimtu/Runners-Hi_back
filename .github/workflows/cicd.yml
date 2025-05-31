@@ -95,7 +95,6 @@ jobs:
     # Production 환경 보호 (수동 승인 필요)
     environment:
       name: production
-      url: http://${{ secrets.SSH_HOST }}:9000
 
     steps:
       - name: 서버 배포
