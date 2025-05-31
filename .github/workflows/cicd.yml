@@ -1,29 +1,187 @@
-name: Docker 이미지 빌드
+name: 통합 CI/CD 파이프라인
 
 on:
   push:
-    branches: [ main, develop ]  # develop 브랜치 추가
+    branches: [develop, main]
   pull_request:
-    branches: [ main ]  # main으로의 PR만
+    branches: [main]
+
+env:
+  DOCKER_IMAGE: lsheon0927/runapp
 
 jobs:
+  # 모든 브랜치에서 빌드 및 테스트
   build:
+    name: 빌드 및 테스트
     runs-on: ubuntu-latest
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Java 17 설정
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Gradle 캐시 설정
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # - name: 테스트 실행
+      #   run: ./gradlew test
+      #   continue-on-error: false
 
       - name: Docker Hub 로그인
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
+      - name: Docker 메타데이터 추출
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
       - name: Docker 이미지 빌드 및 푸시
-        uses: docker/build-push-action@v4
+        id: build
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: |
-            lsheon0927/runapp:latest
-            lsheon0927/runapp:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 빌드 결과 요약
+        run: |
+          echo "### 🚀 빌드 완료!" >> $GITHUB_STEP_SUMMARY
+          echo "- **브랜치**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **커밋**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **이미지 태그**: ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "- **배포 대상**: ✅ Production 환경" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **배포 대상**: ❌ 빌드만 수행" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # main 브랜치에서만 배포 (수동 승인 필요)
+  deploy:
+    name: 운영 환경 배포
+    runs-on: ubuntu-latest
+    needs: build
+
+    # main 브랜치 푸시이고 PR이 아닐 때만 실행
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    # Production 환경 보호 (수동 승인 필요)
+    environment:
+      name: production
+      url: http://${{ secrets.SSH_HOST }}:9000
+
+    steps:
+      - name: 서버 배포
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "🚀 배포 시작: $(date)"
+            
+            # 현재 실행 중인 이미지 태그 저장 (롤백용)
+            cd ~/running-app/app
+            CURRENT_IMAGE=$(docker inspect running-app --format='{{.Config.Image}}' 2>/dev/null || echo "none")
+            echo "현재 이미지: $CURRENT_IMAGE"
+            echo "$CURRENT_IMAGE" > .last-deployed-image
+            
+            # 최신 이미지 다운로드
+            echo "📥 최신 이미지 다운로드 중..."
+            if ! docker pull ${{ env.DOCKER_IMAGE }}:latest; then
+              echo "❌ 이미지 다운로드 실패"
+              exit 1
+            fi
+            
+            # 컨테이너 재시작
+            echo "🔄 컨테이너 재시작 중..."
+            docker-compose down
+            docker-compose up -d
+            
+            # 헬스체크 (최대 60초 대기)
+            echo "🏥 헬스체크 시작..."
+            for i in {1..30}; do
+              if curl -f -s http://localhost:9000/health > /dev/null; then
+                echo "✅ 헬스체크 성공 (${i}*2초 후)"
+                break
+              elif [ $i -eq 30 ]; then
+                echo "❌ 헬스체크 실패 - 롤백 시작"
+            
+                # 롤백 실행
+                if [ "$CURRENT_IMAGE" != "none" ]; then
+                  echo "🔙 이전 이미지로 롤백: $CURRENT_IMAGE"
+                  docker tag $CURRENT_IMAGE ${{ env.DOCKER_IMAGE }}:rollback
+                  docker-compose down
+                  sed -i 's|${{ env.DOCKER_IMAGE }}:latest|${{ env.DOCKER_IMAGE }}:rollback|g' docker-compose.yml
+                  docker-compose up -d
+            
+                  # 롤백 후 헬스체크
+                  sleep 10
+                  if curl -f -s http://localhost:9000/health > /dev/null; then
+                    echo "✅ 롤백 성공"
+                  else
+                    echo "❌ 롤백도 실패"
+                  fi
+            
+                  # docker-compose.yml 원복
+                  sed -i 's|${{ env.DOCKER_IMAGE }}:rollback|${{ env.DOCKER_IMAGE }}:latest|g' docker-compose.yml
+                fi
+                exit 1
+              else
+                echo -n "."
+                sleep 2
+              fi
+            done
+            
+            # 배포 완료
+            echo "🎉 배포 완료: $(date)"
+            echo "📊 컨테이너 상태:"
+            docker ps | grep running-app
+            
+            # 이전 이미지 정리
+            docker image prune -f
+
+      - name: 배포 성공 알림
+        if: success()
+        run: |
+          echo "### 🎉 배포 성공!" >> $GITHUB_STEP_SUMMARY
+          echo "- **환경**: Production" >> $GITHUB_STEP_SUMMARY
+          echo "- **시간**: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- **커밋**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL**: http://your-server-ip:9000" >> $GITHUB_STEP_SUMMARY
+
+      - name: 배포 실패 알림
+        if: failure()
+        run: |
+          echo "### ❌ 배포 실패!" >> $GITHUB_STEP_SUMMARY
+          echo "- **환경**: Production" >> $GITHUB_STEP_SUMMARY
+          echo "- **시간**: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- **커밋**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **조치**: 자동 롤백 시도됨" >> $GITHUB_STEP_SUMMARY
