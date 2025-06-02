@@ -1,4 +1,4 @@
-name: 통합 CI/CD 파이프라인
+name: 모니터링 연동 CI/CD 파이프라인
 
 on:
   push:
@@ -77,7 +77,7 @@ jobs:
       name: production
 
     steps:
-      - name: 서버 배포
+      - name: 서버 배포 및 모니터링 연동
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -87,58 +87,189 @@ jobs:
           timeout: 300s
           command_timeout: 600s
           script: |
+            set -e  # 에러 발생 시 즉시 종료
+            
+            echo "🚀 배포 시작: $(date)"
             cd ${{ secrets.PROJECT_PATH }}
+            
+            # ============================================
+            # 1단계: 배포 전 모니터링 상태 확인
+            # ============================================
+            echo "📊 배포 전 모니터링 상태 확인 중..."
+            
+            # Prometheus 서비스 상태 확인
+            if ! curl -f -s http://localhost:9090/-/healthy >/dev/null 2>&1; then
+              echo "❌ Prometheus 서비스가 비정상입니다"
+              exit 1
+            fi
+            echo "✅ Prometheus 서비스 정상"
+            
+            # 현재 Spring Boot 타겟 상태 확인
+            CURRENT_TARGET_STATUS=$(curl -s http://localhost:9090/api/v1/targets | jq -r '.data.activeTargets[] | select(.labels.job=="spring-boot-app") | .health' 2>/dev/null || echo "unknown")
+            echo "현재 Spring Boot 타겟 상태: $CURRENT_TARGET_STATUS"
+            
+            # ============================================
+            # 2단계: 현재 이미지 백업 및 새 이미지 다운로드
+            # ============================================
             CURRENT_IMAGE=$(docker inspect running-app --format='{{.Config.Image}}' 2>/dev/null || echo "none")
+            echo "현재 이미지: $CURRENT_IMAGE"
             echo "$CURRENT_IMAGE" > .last-deployed-image
             
+            echo "🔐 Docker Hub 로그인..."
             echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login --username "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
             
+            echo "📥 최신 이미지 다운로드 중..."
             if ! docker pull ${{ env.DOCKER_IMAGE }}:latest; then
               echo "❌ 이미지 다운로드 실패"
               exit 1
             fi
             
+            # ============================================
+            # 3단계: 컨테이너 재시작
+            # ============================================
+            echo "🔄 컨테이너 재시작 중..."
             docker-compose -f docker-compose-fixed.yml down
+            
+            # 5초 대기 (완전한 종료 보장)
+            sleep 5
+            
             docker-compose -f docker-compose-fixed.yml up -d
             
+            # ============================================
+            # 4단계: 강화된 헬스체크 (3단계 검증)
+            # ============================================
+            echo "🏥 강화된 헬스체크 시작..."
+            
+            # 4-1. 기본 헬스체크 (60초)
+            echo "  └ 1단계: 기본 애플리케이션 헬스체크..."
             for i in {1..30}; do
-              if curl -f -s http://localhost:${{ secrets.HEALTH_CHECK_PORT }}/health > /dev/null; then
-                echo "✅ 헬스체크 성공"
+              if curl -f -s http://localhost:8100/health >/dev/null 2>&1; then
+                echo "  ✅ 기본 헬스체크 성공 (${i}*2초 후)"
                 break
               elif [ $i -eq 30 ]; then
-                echo "❌ 헬스체크 실패 - 롤백 시작"
-                if [ "$CURRENT_IMAGE" != "none" ]; then
-                  docker tag $CURRENT_IMAGE ${{ env.DOCKER_IMAGE }}:rollback
-                  docker-compose -f docker-compose-fixed.yml down
-                  sed -i 's|${{ env.DOCKER_IMAGE }}:latest|${{ env.DOCKER_IMAGE }}:rollback|g' docker-compose-fixed.yml
-                  docker-compose -f docker-compose-fixed.yml up -d
-                  sleep 10
-                  if curl -f -s http://localhost:${{ secrets.HEALTH_CHECK_PORT }}/health > /dev/null; then
-                    echo "✅ 롤백 성공"
-                  else
-                    echo "❌ 롤백도 실패"
-                  fi
-                  sed -i 's|${{ env.DOCKER_IMAGE }}:rollback|${{ env.DOCKER_IMAGE }}:latest|g' docker-compose-fixed.yml
-                fi
-                exit 1
+                echo "  ❌ 기본 헬스체크 실패"
+                goto_rollback=true
+                break
               else
+                echo -n "."
                 sleep 2
               fi
             done
             
+            # 4-2. Prometheus 메트릭 엔드포인트 확인 (30초)
+            if [ "$goto_rollback" != "true" ]; then
+              echo "  └ 2단계: Prometheus 메트릭 엔드포인트 확인..."
+              for i in {1..15}; do
+                if curl -f -s http://localhost:8100/actuator/prometheus | grep -q "application_ready_time_seconds"; then
+                  echo "  ✅ Prometheus 메트릭 엔드포인트 정상 (${i}*2초 후)"
+                  break
+                elif [ $i -eq 15 ]; then
+                  echo "  ❌ Prometheus 메트릭 엔드포인트 실패"
+                  goto_rollback=true
+                  break
+                else
+                  echo -n "."
+                  sleep 2
+                fi
+              done
+            fi
+            
+            # 4-3. Prometheus 타겟 등록 확인 (60초)
+            if [ "$goto_rollback" != "true" ]; then
+              echo "  └ 3단계: Prometheus 타겟 등록 확인..."
+              for i in {1..30}; do
+                TARGET_STATUS=$(curl -s http://localhost:9090/api/v1/targets | jq -r '.data.activeTargets[] | select(.labels.job=="spring-boot-app") | .health' 2>/dev/null || echo "unknown")
+                if [ "$TARGET_STATUS" = "up" ]; then
+                  echo "  ✅ Prometheus 타겟 등록 성공 (${i}*2초 후)"
+                  break
+                elif [ $i -eq 30 ]; then
+                  echo "  ❌ Prometheus 타겟 등록 실패 (상태: $TARGET_STATUS)"
+                  goto_rollback=true
+                  break
+                else
+                  echo -n "."
+                  sleep 2
+                fi
+              done
+            fi
+            
+            # ============================================
+            # 5단계: 롤백 처리 (모니터링 포함)
+            # ============================================
+            if [ "$goto_rollback" = "true" ]; then
+              echo "🔙 롤백 시작..."
+            
+              if [ "$CURRENT_IMAGE" != "none" ]; then
+                echo "  └ 이전 이미지로 롤백: $CURRENT_IMAGE"
+                docker tag $CURRENT_IMAGE ${{ env.DOCKER_IMAGE }}:rollback
+                docker-compose -f docker-compose-fixed.yml down
+            
+                # docker-compose 파일에서 이미지 태그 임시 변경
+                sed -i 's|${{ env.DOCKER_IMAGE }}:latest|${{ env.DOCKER_IMAGE }}:rollback|g' docker-compose-fixed.yml
+                docker-compose -f docker-compose-fixed.yml up -d
+            
+                # 롤백 후 헬스체크
+                sleep 10
+                if curl -f -s http://localhost:8100/health >/dev/null 2>&1; then
+                  echo "  ✅ 롤백 성공"
+            
+                  # 롤백 후 모니터링 상태 확인
+                  sleep 10
+                  ROLLBACK_TARGET_STATUS=$(curl -s http://localhost:9090/api/v1/targets | jq -r '.data.activeTargets[] | select(.labels.job=="spring-boot-app") | .health' 2>/dev/null || echo "unknown")
+                  echo "  └ 롤백 후 모니터링 상태: $ROLLBACK_TARGET_STATUS"
+                else
+                  echo "  ❌ 롤백도 실패"
+                fi
+            
+                # docker-compose 파일 원복
+                sed -i 's|${{ env.DOCKER_IMAGE }}:rollback|${{ env.DOCKER_IMAGE }}:latest|g' docker-compose-fixed.yml
+              else
+                echo "  └ 이전 이미지가 없어 롤백 불가"
+              fi
+            
+              exit 1
+            fi
+            
+            # ============================================
+            # 6단계: 배포 완료 및 상태 확인
+            # ============================================
+            echo "🎉 배포 완료: $(date)"
+            echo ""
+            echo "📊 최종 상태 확인:"
+            echo "  └ 컨테이너 상태:"
             docker ps | grep running-app
+            echo ""
+            echo "  └ 모니터링 상태:"
+            FINAL_TARGET_STATUS=$(curl -s http://localhost:9090/api/v1/targets | jq -r '.data.activeTargets[] | select(.labels.job=="spring-boot-app") | .health' 2>/dev/null || echo "unknown")
+            echo "    - Prometheus 타겟 상태: $FINAL_TARGET_STATUS"
+            
+            # 메트릭 샘플 확인
+            METRIC_COUNT=$(curl -s http://localhost:8100/actuator/prometheus | wc -l 2>/dev/null || echo "0")
+            echo "    - 수집 중인 메트릭 라인 수: $METRIC_COUNT"
+            
+            echo ""
+            echo "🧹 이전 이미지 정리 중..."
             docker image prune -f
+            
+            echo "✨ 모든 배포 과정 완료!"
 
       - name: 배포 성공 알림
         if: success()
         run: |
           echo "### 🎉 배포 성공!" >> $GITHUB_STEP_SUMMARY
           echo "- **환경**: Production" >> $GITHUB_STEP_SUMMARY
+          echo "- **시간**: $(date)" >> $GITHUB_STEP_SUMMARY
           echo "- **커밋**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **모니터링**: ✅ Prometheus 연동 확인 완료" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL**: http://58.226.77.91:8100" >> $GITHUB_STEP_SUMMARY
+          echo "- **Grafana**: http://58.226.77.91:3000" >> $GITHUB_STEP_SUMMARY
 
       - name: 배포 실패 알림
         if: failure()
         run: |
           echo "### ❌ 배포 실패!" >> $GITHUB_STEP_SUMMARY
           echo "- **환경**: Production" >> $GITHUB_STEP_SUMMARY
+          echo "- **시간**: $(date)" >> $GITHUB_STEP_SUMMARY
           echo "- **커밋**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **조치**: 자동 롤백 시도됨" >> $GITHUB_STEP_SUMMARY
+          echo "- **확인사항**: 모니터링 시스템 상태 점검 필요" >> $GITHUB_STEP_SUMMARY
