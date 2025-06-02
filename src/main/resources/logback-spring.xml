@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Spring Boot 기본 설정 포함 (CONSOLE, FILE 앱펜더 제공) -->
+    <include resource="org/springframework/boot/logging/logback/base.xml"/>
+
+    <!-- Loki HTTP 전송 앱펜더 추가 -->
+    <appender name="LOKI" class="com.github.loki4j.logback.Loki4jAppender">
+        <http>
+            <url>http://running-loki:3100/loki/api/v1/push</url>
+        </http>
+        <format>
+            <label>
+                <pattern>service=running-app,level=%level,host=${HOSTNAME:-unknown}</pattern>
+            </label>
+            <message>
+                <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            </message>
+        </format>
+        <!-- 배치 설정 -->
+        <batchMaxItems>1000</batchMaxItems>
+        <batchTimeoutMs>5000</batchTimeoutMs>
+        <!-- 디버그 활성화 (초기 설정 시에만) -->
+        <verbose>true</verbose>
+    </appender>
+
+    <!-- 루트 로거: 기존 + Loki 추가 -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+        <appender-ref ref="LOKI"/>  <!-- Loki 앱펜더 추가 -->
+    </root>
+
+    <!-- 애플리케이션 로거 (기존 유지) -->
+    <logger name="org.example.runningapp" level="DEBUG"/>
+
+    <!-- 추가 로거 (선택사항) -->
+    <logger name="org.springframework.web" level="DEBUG"/>
+    <logger name="org.springframework.data.mongodb" level="DEBUG"/>
+</configuration>
