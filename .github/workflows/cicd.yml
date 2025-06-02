@@ -87,7 +87,7 @@ jobs:
           timeout: 300s
           command_timeout: 600s
           script: |
-            cd ~/running-app/app
+            cd ${{ secrets.PROJECT_PATH }}
             CURRENT_IMAGE=$(docker inspect running-app --format='{{.Config.Image}}' 2>/dev/null || echo "none")
             echo "$CURRENT_IMAGE" > .last-deployed-image
             
