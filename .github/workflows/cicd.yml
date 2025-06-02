@@ -102,7 +102,7 @@ jobs:
             docker-compose -f docker-compose-fixed.yml up -d
             
             for i in {1..30}; do
-              if curl -f -s http://localhost:9000/health > /dev/null; then
+              if curl -f -s http://localhost:${{ secrets.HEALTH_CHECK_PORT }}/health > /dev/null; then
                 echo "✅ 헬스체크 성공"
                 break
               elif [ $i -eq 30 ]; then
@@ -113,7 +113,7 @@ jobs:
                   sed -i 's|${{ env.DOCKER_IMAGE }}:latest|${{ env.DOCKER_IMAGE }}:rollback|g' docker-compose-fixed.yml
                   docker-compose -f docker-compose-fixed.yml up -d
                   sleep 10
-                  if curl -f -s http://localhost:9000/health > /dev/null; then
+                  if curl -f -s http://localhost:${{ secrets.HEALTH_CHECK_PORT }}/health > /dev/null; then
                     echo "✅ 롤백 성공"
                   else
                     echo "❌ 롤백도 실패"
