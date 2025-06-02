@@ -98,8 +98,8 @@ jobs:
               exit 1
             fi
             
-            docker-compose down
-            docker-compose up -d
+            docker-compose -f docker-compose-fixed.yml down
+            docker-compose -f docker-compose-fixed.yml up -d
             
             for i in {1..30}; do
               if curl -f -s http://localhost:9000/health > /dev/null; then
@@ -109,16 +109,16 @@ jobs:
                 echo "❌ 헬스체크 실패 - 롤백 시작"
                 if [ "$CURRENT_IMAGE" != "none" ]; then
                   docker tag $CURRENT_IMAGE ${{ env.DOCKER_IMAGE }}:rollback
-                  docker-compose down
-                  sed -i 's|${{ env.DOCKER_IMAGE }}:latest|${{ env.DOCKER_IMAGE }}:rollback|g' docker-compose.yml
-                  docker-compose up -d
+                  docker-compose -f docker-compose-fixed.yml down
+                  sed -i 's|${{ env.DOCKER_IMAGE }}:latest|${{ env.DOCKER_IMAGE }}:rollback|g' docker-compose-fixed.yml
+                  docker-compose -f docker-compose-fixed.yml up -d
                   sleep 10
                   if curl -f -s http://localhost:9000/health > /dev/null; then
                     echo "✅ 롤백 성공"
                   else
                     echo "❌ 롤백도 실패"
                   fi
-                  sed -i 's|${{ env.DOCKER_IMAGE }}:rollback|${{ env.DOCKER_IMAGE }}:latest|g' docker-compose.yml
+                  sed -i 's|${{ env.DOCKER_IMAGE }}:rollback|${{ env.DOCKER_IMAGE }}:latest|g' docker-compose-fixed.yml
                 fi
                 exit 1
               else
