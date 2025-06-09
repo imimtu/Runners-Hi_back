@@ -57,6 +57,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			log.error("JWT 인증 처리 중 오류 발생: {}", e.getMessage());
 		}
 
+		//1. 병목 발생 지점.
+		//2. 필터 문제로 스택오버플로우 발생, 앱이 죽어버림
 		filterChain.doFilter(request, response);
 	}
 
