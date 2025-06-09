@@ -16,8 +16,11 @@ import org.example.runningapp.exception.InvalidJwtException;
 import org.example.runningapp.oauth.dto.AuthResponse;
 import org.example.runningapp.oauth.dto.KakaoLoginRequest;
 import org.example.runningapp.oauth.dto.KakaoUserInfo;
+
 import org.example.runningapp.oauth.dto.UserDto;
 import org.example.runningapp.oauth.kakao.KakaoService;
+import org.example.runningapp.simpleLogin.SimpleAuthService;
+import org.example.runningapp.simpleLogin.SimpleLoginRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
 	private final KakaoService kakaoService;
+	private final SimpleAuthService simpleAuthService;  // 새로 추가
 	private final JwtTokenProvider tokenProvider;
 	private final RedisService redisService;
 
@@ -52,6 +56,28 @@ public class AuthController {
 		redisService.saveRefreshToken(user.getId(), tokenDto.refreshToken());
 
 		// 5. 응답 반환
+		return ResponseEntity.ok(new AuthResponse(tokenDto, UserDto.from(user)));
+	}
+
+	/**
+	 * 간단 로그인/회원가입 (테스트용)
+	 * username만으로 회원가입 또는 로그인 처리
+	 */
+	@PostMapping("/simple-login")
+	public ResponseEntity<AuthResponse> simpleLogin(@Valid @RequestBody SimpleLoginRequest request) {
+		log.debug("간단 로그인 요청 처리 - 사용자명: {}", request.username());
+
+		// 1. 간단 로그인/회원가입 처리
+		User user = simpleAuthService.simpleLoginOrSignup(request);
+
+		// 2. JWT 토큰 생성
+		TokenDto tokenDto = tokenProvider.generateTokenPair(user.getId());
+
+		// 3. 리프레시 토큰 Redis에 저장
+		redisService.saveRefreshToken(user.getId(), tokenDto.refreshToken());
+
+		// 4. 응답 반환
+		log.info("간단 로그인 성공 - 사용자 ID: {}, 사용자명: {}", user.getId(), user.getUsername());
 		return ResponseEntity.ok(new AuthResponse(tokenDto, UserDto.from(user)));
 	}
 

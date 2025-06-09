@@ -1,7 +1,5 @@
 package org.example.runningapp.data.controller;
 
-
-
 import org.example.runningapp.data.dto.reqres.RunningDataRequest;
 import org.example.runningapp.data.dto.reqres.RunningDataResponse;
 import org.example.runningapp.data.entity.RunningSession;
@@ -34,19 +32,16 @@ public class RunningDataController {
 		@Valid @RequestBody RunningDataRequest request,
 		@AuthenticationPrincipal UserPrincipal currentUser) {
 
-		log.info("러닝 데이터 저장 요청 - 사용자: {}, 세션: {}, Feature 수: {}, 총 좌표 수: {}",
-			currentUser.getId(), request.sessionId(),
+		// JWT에서 userId를 가져와서 완전한 sessionId 생성
+		String fullSessionId = request.buildFullSessionId(currentUser.getId());
+
+		log.info("러닝 데이터 저장 요청 - 사용자: {}, 세션번호: {}, 타임스탬프: {}, 완전세션: {}, Feature 수: {}, 총 좌표 수: {}",
+			currentUser.getId(), request.sessionNum(), request.startTimestamp(), fullSessionId,
 			request.getFeatureCount(), request.getTotalCoordinateCount());
 
-		// 보안 검증: 토큰의 사용자 ID와 요청의 사용자 ID 일치 확인
-		if (!currentUser.getId().equals(request.userId())) {
-			log.warn("사용자 ID 불일치 - 토큰: {}, 요청: {}", currentUser.getId(), request.userId());
-			return ResponseEntity.status(HttpStatus.FORBIDDEN)
-				.body(RunningDataResponse.error("권한이 없습니다"));
-		}
-
-		// 러닝 데이터 저장
-		RunningDataResponse response = runningDataService.saveRunningData(request);
+		// 보안 검증 불필요 (JWT에서 직접 userId를 가져왔으므로)
+		// 러닝 데이터 저장 (완전한 sessionId와 userId 전달)
+		RunningDataResponse response = runningDataService.saveRunningData(request, currentUser.getId(), fullSessionId);
 
 		return "SUCCESS".equals(response.status()) ?
 			ResponseEntity.ok(response) :
