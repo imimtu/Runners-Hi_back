@@ -10,6 +10,9 @@ import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Document(collection = "running_sessions")
@@ -33,6 +36,35 @@ public class RunningSession {
 
 	// 세션 요약 정보
 	private SessionSummary summary;
+
+	public void appendGeoData(List<Map<String, Object>> newFeatures) {
+		if (this.geoJsonData == null) {
+			this.geoJsonData = new HashMap<>();
+			this.geoJsonData.put("type", "FeatureCollection");
+			this.geoJsonData.put("features", new ArrayList<>());
+		}
+
+		@SuppressWarnings("unchecked")
+		List<Map<String, Object>> existingFeatures =
+			(List<Map<String, Object>>) this.geoJsonData.get("features");
+
+		if (existingFeatures == null) {
+			existingFeatures = new ArrayList<>();
+			this.geoJsonData.put("features", existingFeatures);
+		}
+
+		existingFeatures.addAll(newFeatures);
+	}
+
+	public int getCurrentFeatureCount() {
+		if (this.geoJsonData == null) return 0;
+
+		@SuppressWarnings("unchecked")
+		List<Map<String, Object>> features =
+			(List<Map<String, Object>>) this.geoJsonData.get("features");
+
+		return features != null ? features.size() : 0;
+	}
 
 	@Data
 	@Builder

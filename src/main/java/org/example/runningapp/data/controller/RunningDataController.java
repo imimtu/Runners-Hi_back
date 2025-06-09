@@ -32,16 +32,15 @@ public class RunningDataController {
 		@Valid @RequestBody RunningDataRequest request,
 		@AuthenticationPrincipal UserPrincipal currentUser) {
 
-		// JWT에서 userId를 가져와서 완전한 sessionId 생성
-		String fullSessionId = request.buildFullSessionId(currentUser.getId());
+		// 첫 번째 Feature의 timestampStart를 로그에 사용
+		Long firstTimestamp = request.geoData().features().get(0).properties().timestampStart();
 
-		log.info("러닝 데이터 저장 요청 - 사용자: {}, 세션번호: {}, 타임스탬프: {}, 완전세션: {}, Feature 수: {}, 총 좌표 수: {}",
-			currentUser.getId(), request.sessionNum(), request.startTimestamp(), fullSessionId,
+		log.info("러닝 데이터 저장 요청 - 사용자: {}, 세션번호: {}, 첫번째타임스탬프: {}, Feature 수: {}, 총 좌표 수: {}",
+			currentUser.getId(), request.sessionNum(), firstTimestamp,
 			request.getFeatureCount(), request.getTotalCoordinateCount());
 
-		// 보안 검증 불필요 (JWT에서 직접 userId를 가져왔으므로)
-		// 러닝 데이터 저장 (완전한 sessionId와 userId 전달)
-		RunningDataResponse response = runningDataService.saveRunningData(request, currentUser.getId(), fullSessionId);
+		// 러닝 데이터 저장
+		RunningDataResponse response = runningDataService.saveRunningData(request, currentUser.getId());
 
 		return "SUCCESS".equals(response.status()) ?
 			ResponseEntity.ok(response) :
