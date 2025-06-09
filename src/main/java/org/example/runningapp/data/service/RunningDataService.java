@@ -1,13 +1,12 @@
 package org.example.runningapp.data.service;
 
-
 import org.example.runningapp.data.dto.GeoJsonFeatureCollection;
 import org.example.runningapp.data.dto.RunningFeature;
 import org.example.runningapp.data.dto.RunningProperties;
 import org.example.runningapp.data.dto.reqres.RunningDataRequest;
 import org.example.runningapp.data.dto.reqres.RunningDataResponse;
 import org.example.runningapp.data.dto.reqres.RunningSessionSummary;
-import org.example.runningapp.data.entity.RunningSession; // 올바른 패키지로 수정
+import org.example.runningapp.data.entity.RunningSession;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -27,7 +26,7 @@ public class RunningDataService {
 
 	private final MongoTemplate mongoTemplate;
 
-	public RunningDataResponse saveRunningData(RunningDataRequest request) {
+	public RunningDataResponse saveRunningData(RunningDataRequest request, Long userId, String fullSessionId) {
 		try {
 			// GeoJSON을 Map으로 변환 (MongoDB에 유연하게 저장)
 			Map<String, Object> geoJsonMap = convertToMap(request.geoData());
@@ -51,8 +50,8 @@ public class RunningDataService {
 
 			// MongoDB에 저장
 			RunningSession session = RunningSession.builder()
-				.userId(request.userId())
-				.sessionId(request.sessionId())
+				.userId(userId)  // Controller에서 전달받은 JWT의 userId
+				.sessionId(fullSessionId)  // 완전한 sessionId (userId-sessionNum-timestamp)
 				.geoJsonData(geoJsonMap)
 				.summary(summary)
 				.createdAt(LocalDateTime.now())
@@ -60,8 +59,8 @@ public class RunningDataService {
 
 			mongoTemplate.save(session);
 
-			log.info("러닝 데이터 저장 완료 - 사용자: {}, 세션: {}, Feature 수: {}, 좌표 수: {}",
-				request.userId(), request.sessionId(),
+			log.info("러닝 데이터 저장 완료 - 사용자: {}, 세션번호: {}, 타임스탬프: {}, 완전세션: {}, Feature 수: {}, 좌표 수: {}",
+				userId, request.sessionNum(), request.startTimestamp(), fullSessionId,
 				request.getFeatureCount(), request.getTotalCoordinateCount());
 
 			return RunningDataResponse.success(
@@ -95,8 +94,6 @@ public class RunningDataService {
 
 	// GeoJSON DTO를 Map으로 변환 (MongoDB 저장용)
 	private Map<String, Object> convertToMap(GeoJsonFeatureCollection geoData) {
-		// Jackson ObjectMapper를 사용하여 변환하거나
-		// 수동으로 Map 구조 생성
 		return Map.of(
 			"type", geoData.type(),
 			"features", geoData.features().stream()
