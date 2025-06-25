@@ -1,16 +1,17 @@
 package org.example.runningapp.data.service;
 
-import org.example.runningapp.data.dto.GeoJsonFeatureCollection;
 import org.example.runningapp.data.dto.RunningFeature;
 import org.example.runningapp.data.dto.RunningProperties;
 import org.example.runningapp.data.dto.reqres.RunningDataRequest;
 import org.example.runningapp.data.dto.reqres.RunningDataResponse;
 import org.example.runningapp.data.dto.reqres.RunningSessionSummary;
 import org.example.runningapp.data.entity.RunningSession;
+import org.example.runningapp.data.repository.RunningSessionRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,165 +19,130 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
+import java.util.Optional;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class RunningDataService {
 
-	private final MongoTemplate mongoTemplate;
+	private final RunningSessionRepository repository;      // 간단한 CRUD
+	private final MongoTemplate mongoTemplate;              // 성능 중요한 부분
 
+	/**
+	 *  JPA: 간단한 조회 - 성능 최적화된 필드 선택
+	 */
+	public Integer getNextSessionNumber(Long userId) {
+		return repository.findSessionNumOnlyByUserId(userId)
+			.map(session -> session.getSessionNum() + 1)
+			.orElse(1);
+	}
+
+	/**
+	 * 러닝 데이터 저장 - 하이브리드 방식
+	 */
 	public RunningDataResponse saveRunningData(RunningDataRequest request, Long userId) {
 		try {
-			// ✅ 1. userId + sessionNum으로 기존 세션 찾기
-			RunningSession existingSession = findSessionByUserAndNum(userId, request.sessionNum());
+			String sessionKey = generateSessionKey(userId, request.sessionNum());
 
-			if (existingSession != null) {
-				// ✅ 2-1. 기존 세션에 데이터 추가
-				log.info("기존 세션에 데이터 추가 - 사용자: {}, 세션: {}", userId, existingSession.getSessionId());
-				appendDataToExistingSession(existingSession, request);
+			log.info("러닝 데이터 저장 - 사용자: {}, sessionKey: {}, Feature 수: {}",
+				userId, sessionKey, request.getFeatureCount());
+
+			// JPA: 간단한 존재 여부 확인
+			Optional<RunningSession> existingSession = repository.findByUserIdAndSessionKey(userId, sessionKey);
+
+			if (existingSession.isEmpty()) {
+				return createNewSession(userId, sessionKey, request);
 			} else {
-				// ✅ 2-2. 새 세션 생성
-				String newSessionId = createSessionId(userId, request.sessionNum(), request);
-				log.info("새 세션 생성 - 사용자: {}, 세션: {}", userId, newSessionId);
-				existingSession = createNewSession(userId, newSessionId, request);
+				return appendToExistingSessionOptimized(existingSession.get(), request);
 			}
 
-			// ✅ 3. 응답 생성
-			RunningSessionSummary summaryDto = RunningSessionSummary.fromFeatures(request.geoData().features());
-
-			return RunningDataResponse.success(
-				request.getFeatureCount(),
-				request.getTotalCoordinateCount(),
-				summaryDto
-			);
-
 		} catch (Exception e) {
-			log.error("러닝 데이터 저장 실패: {}", e.getMessage(), e);
+			log.error("러닝 데이터 저장 실패 - 사용자: {}, 오류: {}", userId, e.getMessage(), e);
 			return RunningDataResponse.error("저장 실패: " + e.getMessage());
 		}
 	}
 
-	private RunningSession findSessionByUserAndNum(Long userId, Integer sessionNum) {
-		String sessionPrefix = userId + "-" + sessionNum + "-";
-		Query query = Query.query(
-			Criteria.where("userId").is(userId)
-				.and("sessionId").regex("^" + Pattern.quote(sessionPrefix))
+	/**
+	 * JPA: 새 세션 생성 (단순 저장)
+	 */
+	private RunningDataResponse createNewSession(Long userId, String sessionKey, RunningDataRequest request) {
+		log.info("새 세션 생성 - sessionKey: {}", sessionKey);
+
+		List<Map<String, Object>> features = convertFeaturesToMapList(request.geoData().features());
+
+		RunningSession newSession = RunningSession.builder()
+			.userId(userId)
+			.sessionKey(sessionKey)
+			.sessionNum(request.sessionNum())
+			.createdAt(LocalDateTime.now())
+			.geoDataFeatures(features)
+			.build();
+
+		repository.save(newSession);
+
+		return RunningDataResponse.success(
+			request.getFeatureCount(),
+			request.getTotalCoordinateCount(),
+			RunningSessionSummary.fromFeatures(request.geoData().features())
 		);
-		return mongoTemplate.findOne(query, RunningSession.class);
 	}
 
-	private String createSessionId(Long userId, Integer sessionNum, RunningDataRequest request) {
-		Long firstTimestamp = request.geoData().features().get(0).properties().timestampStart();
-		return userId + "-" + sessionNum + "-" + firstTimestamp;
-	}
+	/**
+	 * ⚡ MongoTemplate: 성능 최적화 - 부분 업데이트만
+	 */
+	private RunningDataResponse appendToExistingSessionOptimized(RunningSession existingSession, RunningDataRequest request) {
+		String sessionKey = existingSession.getSessionKey();
+		log.info("기존 세션에 추가 (최적화) - sessionKey: {}, 기존: {}, 추가: {}",
+			sessionKey, existingSession.getCurrentFeatureCount(), request.getFeatureCount());
 
-	private RunningSession findActiveSession(Long userId, String potentialSessionId) {
-		// 1. 정확한 sessionId로 먼저 찾기
-		Query exactQuery = Query.query(
-			Criteria.where("userId").is(userId)
-				.and("sessionId").is(potentialSessionId)
-		);
-
-		RunningSession session = mongoTemplate.findOne(exactQuery, RunningSession.class);
-
-		if (session != null) {
-			return session;
-		}
-
-		// 2. 같은 sessionNum을 가진 세션이 있는지 확인 (오늘 날짜 기준)
-		String sessionPrefix = userId + "-" + extractSessionNum(potentialSessionId) + "-";
-		Query prefixQuery = Query.query(
-			Criteria.where("userId").is(userId)
-				.and("sessionId").regex("^" + Pattern.quote(sessionPrefix))
-				.and("createdAt").gte(LocalDateTime.now().withHour(0).withMinute(0).withSecond(0))
-		);
-
-		return mongoTemplate.findOne(prefixQuery, RunningSession.class);
-	}
-
-	private Integer extractSessionNum(String sessionId) {
-		String[] parts = sessionId.split("-");
-		return Integer.parseInt(parts[1]);
-	}
-
-	private void appendDataToExistingSession(RunningSession session, RunningDataRequest request) {
-		// 1. 새 Feature들을 Map으로 변환
 		List<Map<String, Object>> newFeatures = convertFeaturesToMapList(request.geoData().features());
 
-		// 2. 기존 세션에 데이터 추가
-		session.appendGeoData(newFeatures);
+		// MongoTemplate: MongoDB $push 연산으로 부분 업데이트만 실행
+		/*  JPA 사용시 성능 이슈가 발생하는 부분
+			RunningSession session = repository.findById(id); // 전체 문서 로드 (수 MB)
+			session.getGeoDataFeatures().addAll(newFeatures);  // 메모리에서 배열 조작
+			repository.save(session);                          // 전체 문서 재작성
+		*/
 
-		// 3. MongoDB에 저장 (UPDATE)
-		mongoTemplate.save(session);
+		Query query = Query.query(Criteria.where("sessionKey").is(sessionKey));
+		Update update = new Update().push("geoDataFeatures").each(newFeatures.toArray());
+
+		mongoTemplate.updateFirst(query, update, RunningSession.class);
+
+		return RunningDataResponse.success(
+			request.getFeatureCount(),
+			request.getTotalCoordinateCount(),
+			RunningSessionSummary.fromFeatures(request.geoData().features())
+		);
 	}
 
-	private RunningSession createNewSession(Long userId, String fullSessionId, RunningDataRequest request) {
-		// GeoJSON 데이터 변환
-		Map<String, Object> geoJsonMap = convertToMap(request.geoData());
+	/**
+	 *  JPA: 단순 조회들
+	 */
+	public List<RunningSession> getUserSessions(Long userId, int limit) {
+		return repository.findByUserIdOrderByCreatedAtDesc(userId, PageRequest.of(0, limit));
+	}
 
-		// 세션 요약 정보 생성
-		RunningSessionSummary summaryDto = RunningSessionSummary.fromFeatures(request.geoData().features());
+	/**
+	 *  JPA: 단순 조회
+	 */
+	public RunningSession getSessionByKey(Long userId, String sessionKey) {
+		return repository.findByUserIdAndSessionKey(userId, sessionKey)
+			.orElse(null);
+	}
 
-		RunningSession.SessionSummary summary = RunningSession.SessionSummary.builder()
-			.sessionStartTime(summaryDto.sessionStartTime())
-			.sessionEndTime(summaryDto.sessionEndTime())
-			.durationSeconds(summaryDto.durationSeconds())
-			.featureCount(request.getFeatureCount())
-			.totalCoordinateCount(request.getTotalCoordinateCount())
-			.avgPace(summaryDto.avgPaceKmh())
-			.avgBpm(summaryDto.avgBpm())
-			.maxHeight(summaryDto.maxHeight())
-			.minHeight(summaryDto.minHeight())
-			.build();
-
-		// 새 세션 생성
-		RunningSession session = RunningSession.builder()
-			.userId(userId)
-			.sessionId(fullSessionId)
-			.geoJsonData(geoJsonMap)
-			.summary(summary)
-			.createdAt(LocalDateTime.now())
-			.build();
-
-		// MongoDB에 저장 (INSERT)
-		mongoTemplate.save(session);
-
-		return session;
+	/**
+	 * sessionKey 생성
+	 */
+	private String generateSessionKey(Long userId, Integer sessionNum) {
+		return userId + "-" + sessionNum;
 	}
 
 	private List<Map<String, Object>> convertFeaturesToMapList(List<RunningFeature> features) {
 		return features.stream()
 			.map(this::convertFeatureToMap)
 			.toList();
-	}
-
-	public List<RunningSession> getUserSessions(Long userId, int limit) {
-		Query query = Query.query(Criteria.where("userId").is(userId))
-			.with(Sort.by(Sort.Direction.DESC, "createdAt"))
-			.limit(limit);
-
-		return mongoTemplate.find(query, RunningSession.class);
-	}
-
-	public RunningSession getSessionData(Long userId, String sessionId) {
-		Query query = Query.query(
-			Criteria.where("userId").is(userId)
-				.and("sessionId").is(sessionId)
-		);
-
-		return mongoTemplate.findOne(query, RunningSession.class);
-	}
-
-	// GeoJSON DTO를 Map으로 변환 (MongoDB 저장용)
-	private Map<String, Object> convertToMap(GeoJsonFeatureCollection geoData) {
-		return Map.of(
-			"type", geoData.type(),
-			"features", geoData.features().stream()
-				.map(this::convertFeatureToMap)
-				.toList()
-		);
 	}
 
 	private Map<String, Object> convertFeatureToMap(RunningFeature feature) {
@@ -195,7 +161,6 @@ public class RunningDataService {
 		map.put("timestampStart", props.timestampStart());
 		map.put("timestampEnd", props.timestampEnd());
 
-		// null이 아닌 값들만 추가
 		if (props.height() != null) map.put("height", props.height());
 		if (props.bpm() != null) map.put("bpm", props.bpm());
 		if (props.pace() != null) map.put("pace", props.pace());
