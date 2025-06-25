@@ -1,0 +1,142 @@
+name: VPN 연결 CI/CD 파이프라인
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [main]
+
+env:
+  DOCKER_IMAGE: lsheon0927/runapp
+
+jobs:
+  build:
+    name: 빌드 및 테스트
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Java 17 설정
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Gradle 캐시 설정
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Docker Hub 로그인
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Docker 이미지 빌드 및 푸시
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:latest
+            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+
+  deploy:
+    name: VPN 연결 후 서버 배포
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      # 1. WireGuard 설치
+      - name: WireGuard 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wireguard-tools
+
+      # 2. WireGuard 설정 파일 생성
+      - name: WireGuard 설정 파일 생성
+        run: |
+          echo "${{ secrets.WG_CONFIG }}" | sudo tee /etc/wireguard/github-client.conf
+          sudo chmod 600 /etc/wireguard/github-client.conf
+
+      # 3. WireGuard 연결
+      - name: WireGuard 연결 시작
+        run: |
+          sudo wg-quick up github-client
+          sleep 10
+
+      # 4. VPN 연결 확인
+      - name: VPN 연결 상태 확인
+        timeout-minutes: 2
+        run: |
+          # WireGuard 상태 확인
+          sudo wg show
+          # VPN 내부 IP로 서버 연결 확인
+          until ping -c1 10.8.0.1; do 
+            echo "VPN 연결 대기 중..."
+            sleep 2
+          done
+          echo "✅ WireGuard VPN 연결 성공!"
+
+      # 5. 서버 배포 (VPN 내부 IP 사용)
+      - name: 서버 배포
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: 10.8.0.1  # VPN 내부 IP 사용
+          username: github-deploy
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22  # 일반 SSH 포트 (VPN 내부)
+          timeout: 300s
+          command_timeout: 600s
+          script: |
+            echo "🚀 VPN을 통한 배포 시작"
+            cd /home/lsheon0927/running-app
+            
+            # Docker 로그인
+            echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login --username "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
+            
+            # 최신 이미지 다운로드
+            docker pull ${{ env.DOCKER_IMAGE }}:latest
+            
+            # 컨테이너 재시작
+            docker-compose -f docker-compose-fixed.yml down
+            docker-compose -f docker-compose-fixed.yml up -d
+            
+            # 헬스체크
+            echo "헬스체크 중..."
+            for i in {1..15}; do
+              if curl -f -s http://localhost:8100/health >/dev/null 2>&1; then
+                echo "✅ 배포 성공!"
+                break
+              elif [ $i -eq 15 ]; then
+                echo "❌ 헬스체크 실패"
+                exit 1
+              else
+                sleep 2
+              fi
+            done
+
+      # 6. WireGuard 연결 해제
+      - name: WireGuard 연결 해제
+        if: always()
+        run: |
+          sudo wg-quick down github-client || true
+          sudo rm -f /etc/wireguard/github-client.conf
+
+      # 7. WireGuard 로그 확인 (디버깅용)
+      - name: WireGuard 상태 로그
+        if: always()
+        run: |
+          echo "=== WireGuard 최종 상태 ==="
+          sudo wg show || true
+          echo "=== 네트워크 인터페이스 ==="
+          ip addr show | grep -E "(wg|10\.8\.)" || true
