@@ -1,6 +1,5 @@
 package org.example.runningapp.data.entity;
 
-
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
@@ -11,12 +10,11 @@ import lombok.AllArgsConstructor;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 @Document(collection = "running_sessions")
-@CompoundIndex(def = "{'userId': 1, 'sessionId': 1}")
+@CompoundIndex(def = "{'userId': 1, 'sessionKey': 1}")  // sessionId → sessionKey로 변경
 @CompoundIndex(def = "{'userId': 1, 'createdAt': -1}")
 @Data
 @Builder
@@ -28,57 +26,18 @@ public class RunningSession {
 	private String id;
 
 	private Long userId;
-	private String sessionId;
-	private LocalDateTime createdAt;
+	private String sessionKey;        // "userId-sessionNum" 형태
+	private Integer sessionNum;       // 원본 세션 번호
 
-	// GeoJSON 데이터를 Map으로 저장 (유연성 확보)
-	private Map<String, Object> geoJsonData;
+	private LocalDateTime createdAt;  // 생성 시간만 유지 (조회 정렬용)
 
-	// 세션 요약 정보
-	private SessionSummary summary;
+	// 모든 10초 단위 features가 여기에 누적됨
+	// 리스트 null 방지를 위한 어노테이션 추가
+	@Builder.Default
+	private List<Map<String, Object>> geoDataFeatures = new ArrayList<>();
 
-	public void appendGeoData(List<Map<String, Object>> newFeatures) {
-		if (this.geoJsonData == null) {
-			this.geoJsonData = new HashMap<>();
-			this.geoJsonData.put("type", "FeatureCollection");
-			this.geoJsonData.put("features", new ArrayList<>());
-		}
-
-		@SuppressWarnings("unchecked")
-		List<Map<String, Object>> existingFeatures =
-			(List<Map<String, Object>>) this.geoJsonData.get("features");
-
-		if (existingFeatures == null) {
-			existingFeatures = new ArrayList<>();
-			this.geoJsonData.put("features", existingFeatures);
-		}
-
-		existingFeatures.addAll(newFeatures);
-	}
-
+	// Feature 개수 반환 (조회용)
 	public int getCurrentFeatureCount() {
-		if (this.geoJsonData == null) return 0;
-
-		@SuppressWarnings("unchecked")
-		List<Map<String, Object>> features =
-			(List<Map<String, Object>>) this.geoJsonData.get("features");
-
-		return features != null ? features.size() : 0;
-	}
-
-	@Data
-	@Builder
-	@NoArgsConstructor
-	@AllArgsConstructor
-	public static class SessionSummary {
-		private Long sessionStartTime;      // 세션 시작 시간 (밀리초)
-		private Long sessionEndTime;        // 세션 종료 시간 (밀리초)
-		private Long durationSeconds;       // 총 운동 시간 (초)
-		private Integer featureCount;       // Feature 개수 (10초 구간 개수)
-		private Integer totalCoordinateCount; // 총 좌표 개수
-		private Double avgPace;             // 평균 페이스 (km/h)
-		private Integer avgBpm;             // 평균 심박수
-		private Double maxHeight;           // 최고 고도 (m)
-		private Double minHeight;           // 최저 고도 (m)
+		return this.geoDataFeatures != null ? this.geoDataFeatures.size() : 0;
 	}
 }
