@@ -7,7 +7,7 @@ COPY src/ src/
 RUN ./gradlew bootJar --no-daemon && \
     java -Djarmode=layertools -jar build/libs/*.jar extract
 
-FROM openjdk:17-jre-alpine
+FROM amazoncorretto:17-alpine
 RUN apk add --no-cache curl && \
     adduser -D spring && \
     rm -rf /var/cache/apk/*
