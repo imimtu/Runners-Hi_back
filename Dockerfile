@@ -1,24 +1,9 @@
-FROM gradle:7.6-jdk17-alpine AS build
+FROM gradle:7.6-jdk17 as build
 WORKDIR /app
-COPY gradle/ gradle/
-COPY gradlew build.gradle settings.gradle ./
-RUN ./gradlew dependencies --no-daemon
-COPY src/ src/
-RUN ./gradlew bootJar --no-daemon && \
-    java -Djarmode=layertools -jar build/libs/*.jar extract
+COPY . .
+RUN gradle bootJar --no-daemon
 
-FROM amazoncorretto:17-alpine
-RUN apk add --no-cache curl && \
-    adduser -D spring && \
-    rm -rf /var/cache/apk/*
-
+FROM openjdk:17-slim
 WORKDIR /app
-USER spring
-
-COPY --from=build --chown=spring:spring /app/dependencies/ ./
-COPY --from=build --chown=spring:spring /app/spring-boot-loader/ ./
-COPY --from=build --chown=spring:spring /app/snapshot-dependencies/ ./
-COPY --from=build --chown=spring:spring /app/application/ ./
-
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=80 -XX:+UseG1GC -XX:+UseContainerSupport"
-ENTRYPOINT ["java", "org.springframework.boot.loader.JarLauncher"]
+COPY --from=build /app/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
