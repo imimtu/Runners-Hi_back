@@ -21,6 +21,4 @@ COPY --from=build --chown=spring:spring /app/snapshot-dependencies/ ./
 COPY --from=build --chown=spring:spring /app/application/ ./
 
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=80 -XX:+UseG1GC -XX:+UseContainerSupport"
-
-EXPOSE 8080
 ENTRYPOINT ["java", "org.springframework.boot.loader.JarLauncher"]
