@@ -23,7 +23,4 @@ COPY --from=build --chown=spring:spring /app/application/ ./
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=80 -XX:+UseG1GC -XX:+UseContainerSupport"
 
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s \
-  CMD curl -f http://localhost:8080/health || exit 1
-
 ENTRYPOINT ["java", "org.springframework.boot.loader.JarLauncher"]
