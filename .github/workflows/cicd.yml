@@ -82,7 +82,7 @@ jobs:
             # 헬스체크 (30초)
             echo "헬스체크 중..."
             for i in {1..15}; do
-              if curl -f -s http://localhost:8100/health >/dev/null 2>&1; then
+              if curl -f -s http://localhost:8080/health >/dev/null 2>&1; then
                 echo "✅ 배포 성공!"
                 break
               elif [ $i -eq 15 ]; then
