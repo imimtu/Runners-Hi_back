@@ -1,5 +1,7 @@
 package org.example.runningapp.domain.running.service;
 
+import static org.springframework.data.mongodb.core.FindAndModifyOptions.*;
+
 import org.example.runningapp.domain.running.dto.RunningFeature;
 import org.example.runningapp.domain.running.dto.RunningProperties;
 import org.example.runningapp.domain.running.dto.RunningDataRequest;
@@ -93,22 +95,39 @@ public class RunningDataService {
 	 */
 	private RunningDataResponse appendToExistingSessionOptimized(RunningSession existingSession, RunningDataRequest request) {
 		String sessionKey = existingSession.getSessionKey();
+		Long userId = existingSession.getUserId();
+
 		log.info("기존 세션에 추가 (최적화) - sessionKey: {}, 기존: {}, 추가: {}",
 			sessionKey, existingSession.getCurrentFeatureCount(), request.getFeatureCount());
 
 		List<Map<String, Object>> newFeatures = convertFeaturesToMapList(request.geoData().features());
 
-		// MongoTemplate: MongoDB $push 연산으로 부분 업데이트만 실행
-		/*  JPA 사용시 성능 이슈가 발생하는 부분
-			RunningSession session = repository.findById(id); // 전체 문서 로드 (수 MB)
-			session.getGeoDataFeatures().addAll(newFeatures);  // 메모리에서 배열 조작
-			repository.save(session);                          // 전체 문서 재작성
-		*/
+		// userId + sessionKey 로 확정적인 타겟팅
+		Query query = Query.query(
+			Criteria.where("userId").is(userId)
+				.and("sessionKey").is(sessionKey)
+		);
 
-		Query query = Query.query(Criteria.where("sessionKey").is(sessionKey));
-		Update update = new Update().push("geoDataFeatures").each(newFeatures.toArray());
+		// 없으면 생성(setOnInsert), 있으면 push 로 원자적 갱신
+		Update update = new Update()
+			.setOnInsert("userId", userId)
+			.setOnInsert("sessionKey", sessionKey)
+			.setOnInsert("sessionNum", request.sessionNum())
+			.setOnInsert("createdAt", LocalDateTime.now())
+			.push("geoDataFeatures").each(newFeatures.toArray());
 
-		mongoTemplate.updateFirst(query, update, RunningSession.class);
+		var options =
+			options()
+				.upsert(true)
+				.returnNew(true);
+
+		RunningSession updated =
+			mongoTemplate.findAndModify(query, update, options, RunningSession.class);
+
+		if (updated == null) {
+			log.error("세션 업데이트 실패(FindAndModify null) - userId: {}, sessionKey: {}", userId, sessionKey);
+			return RunningDataResponse.error("세션 업데이트 실패");
+		}
 
 		return RunningDataResponse.success(
 			request.getFeatureCount(),
@@ -116,6 +135,7 @@ public class RunningDataService {
 			RunningSessionSummary.fromFeatures(request.geoData().features())
 		);
 	}
+
 
 	/**
 	 *  JPA: 단순 조회들
