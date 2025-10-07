@@ -41,7 +41,7 @@ public class RunningDataService {
 		}
 
 		try {
-			return repository.findSessionNumOnlyByUserId(userId)
+			return repository.findTopByUserIdOrderBySessionNumDesc(userId)
 				.map(session -> session.getSessionNum() + 1)
 				.orElse(1);
 		} catch (Exception e) {
