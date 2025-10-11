@@ -1,10 +1,15 @@
 package org.example.runningapp.domain.user.controller;
 
 import java.util.List;
+import java.util.Map;
 
 import org.example.runningapp.domain.user.repository.UserRepository;
 import org.example.runningapp.domain.user.entity.User;
+import org.example.runningapp.domain.user.service.UserService;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,9 +19,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/users")
 public class UserController {
 	private final UserRepository userRepository;
+	private final UserService userService;
 
-	public UserController(UserRepository userRepository) {
+	public UserController(UserRepository userRepository, UserService userService) {
 		this.userRepository = userRepository;
+		this.userService = userService;
 	}
 
 	@PostMapping
@@ -27,5 +34,15 @@ public class UserController {
 	@GetMapping
 	public List<User> getAllUsers() {
 		return userRepository.findAll();
+	}
+
+	@DeleteMapping("/delete/{userId}")
+	public ResponseEntity<Map<String, Object>> deleteUser(@PathVariable Long userId) {
+		userService.deleteUser(userId);
+
+		return ResponseEntity.ok(Map.of(
+			"message", "회원이 삭제되었습니다",
+			"deletedUserId", userId
+		));
 	}
 }
