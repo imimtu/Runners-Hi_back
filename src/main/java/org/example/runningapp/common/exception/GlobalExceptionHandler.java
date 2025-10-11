@@ -129,6 +129,25 @@ public class GlobalExceptionHandler {
 			));
 	}
 
+	@ExceptionHandler(UserNotFoundException.class)
+	public ResponseEntity<ErrorResponse> handleUserNotFoundException(
+		UserNotFoundException e, HttpServletRequest request) {
+
+		Map<String, Object> businessEvent = createBusinessEventMap(request, e, "USER_NOT_FOUND");
+		log.warn(Markers.append("business_event", businessEvent),
+			"사용자 조회 실패 - IP: {}, URI: {}, 메시지: {}",
+			getClientIP(request), request.getRequestURI(), e.getMessage());
+
+		return ResponseEntity
+			.status(HttpStatus.NOT_FOUND)
+			.body(ErrorResponse.detailed(
+				"USER-002",
+				e.getMessage(),
+				"요청하신 사용자를 찾을 수 없습니다",
+				request.getRequestURI()
+			));
+	}
+
 	// =========================== 데이터베이스 예외 ===========================
 
 	@ExceptionHandler(DataIntegrityViolationException.class)
