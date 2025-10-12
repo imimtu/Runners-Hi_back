@@ -20,4 +20,6 @@ public interface RunningSessionRepository extends MongoRepository<RunningSession
 	// 성능 최적화: sessionNum만 조회
 	@Query(value = "{'userId': ?0}", fields = "{'sessionNum': 1}")
 	Optional<RunningSession> findSessionNumOnlyByUserId(Long userId);
+	void deleteByUserId(Long userId);
+
 }
