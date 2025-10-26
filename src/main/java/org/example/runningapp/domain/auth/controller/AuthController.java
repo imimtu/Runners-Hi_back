@@ -4,12 +4,11 @@ import java.util.Map;
 
 import io.jsonwebtoken.Claims;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.example.runningapp.domain.user.entity.User;
 import org.example.runningapp.common.security.JwtTokenProvider;
-import org.example.runningapp.infrastructure.redis.RedisService;
+// import org.example.runningapp.infrastructure.redis.RedisService;
 
 import org.example.runningapp.config.dto.TokenDto;
 import org.example.runningapp.common.exception.InvalidJwtException;
@@ -31,15 +30,20 @@ import org.springframework.web.bind.annotation.RestController;
 @Slf4j
 @RestController
 @RequestMapping("/api/auth")
-@RequiredArgsConstructor
 public class AuthController {
 
 	private final KakaoService kakaoService;
 	private final SimpleAuthService simpleAuthService;  // 새로 추가
 	private final JwtTokenProvider tokenProvider;
-	private final RedisService redisService;
+	// private final RedisService redisService;
 
-	@PostMapping("/kakao/login")
+    public AuthController(KakaoService kakaoService, SimpleAuthService simpleAuthService, JwtTokenProvider tokenProvider) {
+        this.kakaoService = kakaoService;
+        this.simpleAuthService = simpleAuthService;
+        this.tokenProvider = tokenProvider;
+    }
+
+    @PostMapping("/kakao/login")
 	public ResponseEntity<AuthResponse> kakaoLogin(@Valid @RequestBody KakaoLoginRequest request) {
 		log.debug("카카오 로그인 요청 처리");
 
@@ -53,7 +57,7 @@ public class AuthController {
 		TokenDto tokenDto = tokenProvider.generateTokenPair(user.getId());
 
 		// 4. 리프레시 토큰 Redis에 저장
-		redisService.saveRefreshToken(user.getId(), tokenDto.refreshToken());
+		// redisService.saveRefreshToken(user.getId(), tokenDto.refreshToken());
 
 		// 5. 응답 반환
 		return ResponseEntity.ok(new AuthResponse(tokenDto, UserDto.from(user)));
@@ -74,7 +78,7 @@ public class AuthController {
 		TokenDto tokenDto = tokenProvider.generateTokenPair(user.getId());
 
 		// 3. 리프레시 토큰 Redis에 저장
-		redisService.saveRefreshToken(user.getId(), tokenDto.refreshToken());
+		// redisService.saveRefreshToken(user.getId(), tokenDto.refreshToken());
 
 		// 4. 응답 반환
 		log.info("간단 로그인 성공 - 사용자 ID: {}, 사용자명: {}", user.getId(), user.getUsername());
@@ -91,13 +95,13 @@ public class AuthController {
 				Long userId = tokenProvider.getUserIdFromToken(accessToken);
 
 				// 2. Redis에서 리프레시 토큰 삭제
-				redisService.deleteRefreshToken(userId);
+				// redisService.deleteRefreshToken(userId);
 
 				// 3. 액세스 토큰을 블랙리스트에 추가
 				Claims claims = tokenProvider.parseToken(accessToken);
 				long expirationTime = claims.getExpiration().getTime() - System.currentTimeMillis();
 				if (expirationTime > 0) {
-					redisService.addToBlacklist(accessToken, expirationTime);
+					// redisService.addToBlacklist(accessToken, expirationTime);
 				}
 			} catch (InvalidJwtException e) {
 				log.debug("로그아웃 처리 중 무효한 토큰: {}", e.getMessage());

@@ -1,3 +1,4 @@
+/*
 package org.example.runningapp.config.database;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -55,3 +56,4 @@ public class RedisConfig {
 		return redisTemplate;
 	}
 }
+*/

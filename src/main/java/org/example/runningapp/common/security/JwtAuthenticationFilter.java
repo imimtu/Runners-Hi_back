@@ -4,11 +4,10 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.example.runningapp.domain.user.entity.User;
-import org.example.runningapp.infrastructure.redis.RedisService;
+// import org.example.runningapp.infrastructure.redis.RedisService;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -25,15 +24,18 @@ import java.util.Optional;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 	private final JwtTokenProvider tokenProvider;
-	private final RedisService redisService;
+	// private final RedisService redisService;
 	private static final String AUTHORIZATION_HEADER = "Authorization";
 	private static final String BEARER_PREFIX = "Bearer ";
 
-	@Override
+    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider) {
+        this.tokenProvider = tokenProvider;
+    }
+
+    @Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 		throws ServletException, IOException {
 		try {
@@ -41,10 +43,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 			jwt.ifPresent(token -> {
 				// 토큰이 블랙리스트에 있는지 확인
-				if (redisService.isTokenBlacklisted(token)) {
+				/*if (redisService.isTokenBlacklisted(token)) {
 					log.debug("블랙리스트에 등록된 토큰입니다");
 					return;
-				}
+				}*/
 
 				// 토큰 검증과 동시에 사용자 정보 조회 (DB 조회 1번으로 최적화)
 				tokenProvider.validateTokenAndGetUser(token)

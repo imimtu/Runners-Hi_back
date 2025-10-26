@@ -1,3 +1,4 @@
+/*
 package org.example.runningapp.infrastructure.redis;
 
 import lombok.RequiredArgsConstructor;
@@ -56,3 +57,4 @@ public class RedisService {
 		return "blacklist:token:" + token;
 	}
 }
+*/

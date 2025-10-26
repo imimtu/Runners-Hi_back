@@ -43,7 +43,7 @@ dependencies {
 
     // 모니터링을 위한 Actuator 및 Micrometer
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
-    implementation 'io.micrometer:micrometer-registry-prometheus'
+    // implementation 'io.micrometer:micrometer-registry-prometheus'
 
     // Lombok
     compileOnly 'org.projectlombok:lombok'
@@ -55,8 +55,8 @@ dependencies {
     testImplementation 'org.springframework.kafka:spring-kafka-test'
 
     // Actuator와 Prometheus 통합
-    implementation 'org.springframework.boot:spring-boot-starter-actuator'
-    implementation 'io.micrometer:micrometer-registry-prometheus'
+    // implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // implementation 'io.micrometer:micrometer-registry-prometheus'
 
     implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
 
@@ -75,16 +75,16 @@ dependencies {
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5'
 
 // Redis 연동을 위한 의존성 (JWT 토큰 저장 용도)
-    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    // implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
 // 유효성 검증 라이브러리
     implementation 'org.springframework.boot:spring-boot-starter-validation'
 
     // 로깅 관련 의존성
-    implementation 'net.logstash.logback:logstash-logback-encoder:7.3'
+    // implementation 'net.logstash.logback:logstash-logback-encoder:7.3'
 
     // Loki 연동을 위한 의존성 추가
-    implementation 'com.github.loki4j:loki-logback-appender:1.4.2'
+    // implementation 'com.github.loki4j:loki-logback-appender:1.4.2'
 }
 
 tasks.test {
