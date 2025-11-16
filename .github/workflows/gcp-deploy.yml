@@ -1,0 +1,62 @@
+# .github/workflows/gcp-deploy.yml
+
+name: Deploy to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  GCP_REGION: asia-northeast3
+  GAR_LOCATION: asia-northeast3
+  SERVICE_NAME: runners-hi-service
+  REPO_NAME: running-app-repo
+  IMAGE_NAME: runners-hi-backend
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    # Workload Identity Federation에 필요한 권한 설정
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Google Cloud Auth
+        id: auth
+        uses: 'google-github-actions/auth@v2'
+        with:
+          workload_identity_provider: '${{ secrets.GCP_WIF_PROVIDER }}'
+          service_account: '${{ secrets.GCP_SA_EMAIL }}'
+
+      - name: Set up Cloud SDK
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev
+
+      - name: Build and Push Docker Image
+        run: |-
+          docker build --platform linux/amd64 -t ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} .
+          docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Deploy to Cloud Run
+        run: |-
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --service-account "runners-hi-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --update-secrets=SPRING_DATASOURCE_URL=DB_URL:latest \
+            --update-secrets=SPRING_DATASOURCE_USERNAME=DB_USER:latest \
+            --update-secrets=SPRING_DATASOURCE_PASSWORD=DB_PASS:latest \
+            --update-secrets=SPRING_DATA_MONGODB_URI=MONGO_URI:latest \
+            --update-secrets=APP_AUTH_JWT_SECRET_KEY=JWT_SECRET:latest \
+            --set-env-vars=SPRING_JPA_HIBERNATE_DDL_AUTO=validate \
+            --region ${{ env.GCP_REGION }} \
+            --allow-unauthenticated \
+            --port 8080
