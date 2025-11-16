@@ -132,4 +132,12 @@ public class SimpleAuthService {
 		String[] reserved = {"admin", "root", "system", "test", "guest"};
 		return java.util.Arrays.asList(reserved).contains(username.toLowerCase());
 	}
+
+	@Transactional
+	public void updateUserRefreshToken(Long userId, String refreshToken) {
+		User user = userRepository.findById(userId)
+			.orElseThrow(() -> new org.example.runningapp.common.exception.UserNotFoundException("사용자를 찾을 수 없습니다. ID: " + userId));
+		user.updateRefreshToken(refreshToken);
+		userRepository.save(user);
+	}
 }

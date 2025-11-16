@@ -8,7 +8,7 @@
 #COPY --from=build /app/build/libs/*.jar app.jar
 #ENTRYPOINT ["java", "-jar", "app.jar"]
 
-FROM gradle:7.6-jdk17-alpine as build
+FROM gradle:7.6-jdk17 as build
 WORKDIR /app
 
 COPY build.gradle settings.gradle gradle.properties* ./
@@ -19,7 +19,7 @@ RUN gradle dependencies --no-daemon --quiet
 COPY src/ ./src/
 RUN gradle bootJar --no-daemon --quiet
 
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:17-jre
 WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]

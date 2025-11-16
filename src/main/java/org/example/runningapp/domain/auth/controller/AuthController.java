@@ -1,14 +1,17 @@
 package org.example.runningapp.domain.auth.controller;
 
+import java.util.Date;
 import java.util.Map;
 
 import io.jsonwebtoken.Claims;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.example.runningapp.domain.auth.document.BlacklistedToken;
+import org.example.runningapp.domain.auth.repository.BlacklistedTokenRepository;
 import org.example.runningapp.domain.user.entity.User;
 import org.example.runningapp.common.security.JwtTokenProvider;
-// import org.example.runningapp.infrastructure.redis.RedisService;
 
 import org.example.runningapp.config.dto.TokenDto;
 import org.example.runningapp.common.exception.InvalidJwtException;
@@ -30,20 +33,15 @@ import org.springframework.web.bind.annotation.RestController;
 @Slf4j
 @RestController
 @RequestMapping("/api/auth")
+@RequiredArgsConstructor
 public class AuthController {
 
 	private final KakaoService kakaoService;
-	private final SimpleAuthService simpleAuthService;  // 새로 추가
+	private final SimpleAuthService simpleAuthService;
 	private final JwtTokenProvider tokenProvider;
-	// private final RedisService redisService;
+	private final BlacklistedTokenRepository blacklistedTokenRepository;
 
-    public AuthController(KakaoService kakaoService, SimpleAuthService simpleAuthService, JwtTokenProvider tokenProvider) {
-        this.kakaoService = kakaoService;
-        this.simpleAuthService = simpleAuthService;
-        this.tokenProvider = tokenProvider;
-    }
-
-    @PostMapping("/kakao/login")
+	@PostMapping("/kakao/login")
 	public ResponseEntity<AuthResponse> kakaoLogin(@Valid @RequestBody KakaoLoginRequest request) {
 		log.debug("카카오 로그인 요청 처리");
 
@@ -56,8 +54,8 @@ public class AuthController {
 		// 3. JWT 토큰 생성
 		TokenDto tokenDto = tokenProvider.generateTokenPair(user.getId());
 
-		// 4. 리프레시 토큰 Redis에 저장
-		// redisService.saveRefreshToken(user.getId(), tokenDto.refreshToken());
+		// 4. 리프레시 토큰 DB에 저장
+		simpleAuthService.updateUserRefreshToken(user.getId(), tokenDto.refreshToken());
 
 		// 5. 응답 반환
 		return ResponseEntity.ok(new AuthResponse(tokenDto, UserDto.from(user)));
@@ -77,35 +75,41 @@ public class AuthController {
 		// 2. JWT 토큰 생성
 		TokenDto tokenDto = tokenProvider.generateTokenPair(user.getId());
 
-		// 3. 리프레시 토큰 Redis에 저장
-		// redisService.saveRefreshToken(user.getId(), tokenDto.refreshToken());
+		// 3. 리프레시 토큰 DB에 저장
+		simpleAuthService.updateUserRefreshToken(user.getId(), tokenDto.refreshToken());
 
 		// 4. 응답 반환
 		log.info("간단 로그인 성공 - 사용자 ID: {}, 사용자명: {}", user.getId(), user.getUsername());
 		return ResponseEntity.ok(new AuthResponse(tokenDto, UserDto.from(user)));
 	}
 
+    // TODO: 아래 케이스에 맞는 올바른 변수명으로 정정 필요.
+    //  - login API : input의 'accessToken' 은 카카오 접근 토큰
+    //  - logout API : input의 'accessToken' 은 서버가 발급한 JWT refresh 토큰
 	@PostMapping("/logout")
 	public ResponseEntity<Void> logout(@RequestBody Map<String, String> request) {
 		String accessToken = request.get("accessToken");
 
 		if (StringUtils.hasText(accessToken)) {
 			try {
-				// 1. 토큰에서 사용자 ID 추출
-				Long userId = tokenProvider.getUserIdFromToken(accessToken);
+				// 1. 만료 여부와 상관없이 토큰에서 사용자 ID 추출
+				Long userId = tokenProvider.getUserIdFromTokenIgnoringExpiration(accessToken);
+                log.debug("userId : {}", userId);
 
-				// 2. Redis에서 리프레시 토큰 삭제
-				// redisService.deleteRefreshToken(userId);
+				// 2. DB에서 리프레시 토큰 삭제 (핵심 로그아웃 로직)
+				simpleAuthService.updateUserRefreshToken(userId, null);
 
-				// 3. 액세스 토큰을 블랙리스트에 추가
-				Claims claims = tokenProvider.parseToken(accessToken);
-				long expirationTime = claims.getExpiration().getTime() - System.currentTimeMillis();
-				if (expirationTime > 0) {
-					// redisService.addToBlacklist(accessToken, expirationTime);
-				}
+				// 3. 아직 유효한 토큰이라면 블랙리스트에 추가하여 즉시 사용 불가 처리
+				Claims claims = tokenProvider.parseToken(accessToken); // 유효성(만료 포함) 검사
+				Date expiration = claims.getExpiration();
+
+				BlacklistedToken blacklistedToken = new BlacklistedToken(null, accessToken, expiration);
+				blacklistedTokenRepository.save(blacklistedToken);
+
 			} catch (InvalidJwtException e) {
-				log.debug("로그아웃 처리 중 무효한 토큰: {}", e.getMessage());
-				// 이미 만료된 토큰이므로 추가 처리 필요 없음
+				// - 토큰이 이미 만료된 경우: parseToken에서 예외 발생. 하지만 리프레시 토큰은 이미 삭제되었으므로 로그아웃 처리 완료.
+				// - 토큰 서명이 위조된 경우: getUserIdFromTokenIgnoringExpiration에서 예외 발생. 어차피 유효하지 않은 토큰이므로 무시.
+				log.debug("로그아웃 처리 중 토큰 오류 발생 (만료 등 정상적인 경우 포함): {}", e.getMessage());
 			}
 		}
 

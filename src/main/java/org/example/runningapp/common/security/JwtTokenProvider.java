@@ -91,6 +91,31 @@ public class JwtTokenProvider {
 		}
 	}
 
+	public Long getUserIdFromTokenIgnoringExpiration(String token) {
+		Claims claims = parseTokenIgnoringExpiration(token);
+		return Long.parseLong(claims.getSubject());
+	}
+
+	private Claims parseTokenIgnoringExpiration(String token) {
+		try {
+			return Jwts.parserBuilder()
+				.setSigningKey(key)
+				.build()
+				.parseClaimsJws(token)
+				.getBody();
+		} catch (ExpiredJwtException e) {
+			return e.getClaims(); // 만료된 경우에도 클레임을 반환
+		} catch (UnsupportedJwtException e) {
+			throw new InvalidJwtException("지원되지 않는 JWT 토큰입니다.", e);
+		} catch (MalformedJwtException e) {
+			throw new InvalidJwtException("유효하지 않은 JWT 서명입니다.", e);
+		} catch (IllegalArgumentException e) {
+			throw new InvalidJwtException("JWT 토큰이 비어있습니다.", e);
+		} catch (Exception e) {
+			throw new InvalidJwtException("JWT 토큰 검증 중 오류가 발생했습니다.", e);
+		}
+	}
+
 	public Optional<User> validateTokenAndGetUser(String token) {
 		try {
 			Claims claims = parseToken(token);

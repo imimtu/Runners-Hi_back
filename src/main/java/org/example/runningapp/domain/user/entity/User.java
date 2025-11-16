@@ -50,4 +50,11 @@ public class User {
 		this.profileImage = profileImage;
 		return this;
 	}
+
+	@Column(name = "refresh_token")
+	private String refreshToken;
+
+	public void updateRefreshToken(String refreshToken) {
+		this.refreshToken = refreshToken;
+	}
 }
