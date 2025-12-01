@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.example.runningapp.common.exception.UserNotFoundException;
 import org.example.runningapp.domain.running.repository.RunningSessionRepository;
+import org.example.runningapp.domain.user.dto.UserInfoResponse;
 import org.example.runningapp.domain.user.entity.User;
 import org.example.runningapp.domain.user.repository.UserRepository;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,13 @@ public class UserService {
 	public UserService(UserRepository userRepository,RunningSessionRepository runningSessionRepository) {
 		this.runningSessionRepository=runningSessionRepository;
 		this.userRepository = userRepository;
+	}
+
+	public UserInfoResponse getUserInfo(Long userId) {
+		User user = userRepository.findById(userId)
+			.orElseThrow(() -> new UserNotFoundException("ID " + userId + "에 해당하는 사용자가 존재하지 않습니다"));
+
+		return new UserInfoResponse(user.getUsername(), user.getEmail());
 	}
 
 	public void deleteUser(Long userId) {
